@@ -44,6 +44,8 @@ def scan(root: Path) -> list[Item]:
             if p.is_file() and (p.name not in KNOWN or p.name.startswith("recording."))
         )
         try:
+            if not manifest.exists():
+                raise UserError("no manifest; the first publication never completed")
             current = (
                 item.path / "revisions" / str(json.loads(manifest.read_text()).get("revision"))
             )
