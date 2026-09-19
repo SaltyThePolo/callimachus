@@ -1,0 +1,37 @@
+# Manual only: builds the image locally on the runner and exercises the Compose workflow with
+# synthetic data. Not a recurring build and nothing is published.
+name: Container smoke test
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build
+      - name: Import synthetic meetings, then repeat after the container is gone
+        run: |
+          mkdir -p .callimachus archive
+          docker compose run --rm -v "$PWD/examples:/examples:ro" setup sync --input /examples/meeting.json | tee first.log
+          grep -q "imported=1" first.log
+          docker compose run --rm -v "$PWD/examples:/examples:ro" setup sync --input /examples/meeting.json | tee second.log
+          grep -q "imported=1" second.log
+          ls -la archive archive/*/
+          test -f archive/*/transcript.md
+          sudo test -f .callimachus/registry.json
+          docker compose run --rm setup doctor | tee doctor.log
+          grep -q "last_pass=ok" doctor.log
+      - name: Watcher publishes no ports, opens no browser, reports missing login
+        run: |
+          docker compose up -d
+          sleep 8
+          docker compose ps
+          test -z "$(docker compose port callimachus 8765 2>/dev/null)"
+          docker compose logs callimachus | tee watch.log
+          grep -q "login wispr" watch.log
+          docker compose down
+      - name: Setup service publishes callback ports on the host loopback only
+        run: |
+          docker compose --profile setup config | grep -A8 'ports:' | tee ports.log
+          grep -q '127.0.0.1' ports.log

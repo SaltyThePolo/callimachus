@@ -19,6 +19,7 @@ class Config:
     google_folder: str | None
     timezone: ZoneInfo
     restore: bool
+    oauth_bind: str
 
     @classmethod
     def load(cls, env_file: Path):
@@ -48,6 +49,7 @@ class Config:
             google_folder=os.getenv("CALLIMACHUS_GOOGLE_DRIVE_FOLDER_ID") or None,
             timezone=zone,
             restore=_flag("CALLIMACHUS_RESTORE_DELETED"),
+            oauth_bind=os.getenv("CALLIMACHUS_OAUTH_BIND", "127.0.0.1"),
         )
 
 

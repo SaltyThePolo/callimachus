@@ -228,7 +228,9 @@ def main():
                 if args.service == "wispr":
 
                     async def login():
-                        async with connect_wispr(config.state, interactive=True) as session:
+                        async with connect_wispr(
+                            config.state, interactive=True, bind=config.oauth_bind
+                        ) as session:
                             names, cursor = set(), None
                             while True:
                                 tools = await session.list_tools(cursor=cursor)
@@ -243,7 +245,9 @@ def main():
 
                     asyncio.run(login())
                 else:
-                    service = drive_service(config.state, config.google_client, interactive=True)
+                    service = drive_service(
+                        config.state, config.google_client, interactive=True, bind=config.oauth_bind
+                    )
                     folder = DriveStore(service, config.state, config.google_folder).root()
                     print(f"Drive archive: https://drive.google.com/drive/folders/{folder}")
                 print("Authorization saved locally.")

@@ -1,0 +1,6 @@
+# Whitelist: only the files the image needs. Environment files, credentials, state and archives never enter the build context.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src/

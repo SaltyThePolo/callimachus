@@ -33,7 +33,7 @@ uv run callimachus watch
 
 Discovery starts from all available history, with no cutoff to choose. When Wispr caps a search, the start-time window is split and each part is paginated; stable meeting IDs prevent duplicates across parts. A window that cannot be split further is reported as incomplete discovery instead of being silently truncated. `--since` and `--until` remain available to narrow a pass manually. Every pass revisits every meeting: entries whose `modified_at` matches the archived snapshot are counted as `unchanged` and not fetched again, so edits to old meetings and meetings that became ready later are picked up on the next pass. A failed search or a failed pass never marks anything as deleted.
 
-Wispr login opens your browser, listens on `127.0.0.1:8765` for up to five minutes, and stores authorization locally. Your account needs Notetaker/MCP access. No Wispr API key is required. A pre-existing ChatGPT/Codex connection does not authorize this standalone client. See [Wispr’s remote MCP setup](https://docs.wisprflow.ai/articles/9551372685-connect-an-mcp-client-to-wispr-flow-remote-mcp-server).
+Wispr login prints an authorization URL, opens it in your browser when one is available, listens on `127.0.0.1:8765` for up to five minutes, and stores authorization locally. Google login uses `127.0.0.1:8766` the same way. Your account needs Notetaker/MCP access. No Wispr API key is required. A pre-existing ChatGPT/Codex connection does not authorize this standalone client. See [Wispr’s remote MCP setup](https://docs.wisprflow.ai/articles/9551372685-connect-an-mcp-client-to-wispr-flow-remote-mcp-server).
 
 ## Google Drive API setup
 
@@ -64,6 +64,33 @@ Drive has no transaction spanning the three files. If a sync is interrupted betw
 `CALLIMACHUS_GOOGLE_DRIVE_FOLDER_ID` optionally selects an existing folder **already accessible to this OAuth app**. Merely pasting an arbitrary folder ID does not grant access under `drive.file`; leaving this setting blank is the supported simplest setup. A Google Picker flow is not included.
 
 Google OAuth setup follows the [official Python quickstart](https://developers.google.com/workspace/drive/api/quickstart/python). In external testing mode, refresh tokens can expire after seven days for these scopes; production consent configuration or reauthorization may be needed. See [Google’s OAuth token-expiration guidance](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+## Run it in Docker
+
+A local source build and one Compose file run the watcher unattended on macOS, Windows or Linux with a maintained Docker runtime. No prebuilt Callimachus image or Docker Hub account is required. Private state (credentials, registries, status) lives in the mounted `.callimachus/` directory, so replacing the container keeps identity, deletion intent and authorization. In Drive mode the archive mount stays unused: there is no local mirror.
+
+```sh
+cp .env.example .env            # edit destination and Drive settings; Compose reads it
+docker compose build
+docker compose run --rm --service-ports setup login wispr
+docker compose run --rm --service-ports setup login drive   # Drive mode only
+docker compose up -d
+docker compose run --rm setup doctor
+```
+
+Setup is a separate, interactive command: it prints an authorization URL to open in the host browser and listens for the callback inside the container, published only on the host loopback (`127.0.0.1:8765` for Wispr, `127.0.0.1:8766` for Google). The redirect URI stays on `127.0.0.1`, the OAuth `state` is validated and PKCE is retained; the listener closes when setup finishes. The watcher publishes no ports and never opens a browser: expired access tokens are refreshed with the stored refresh token on a cold start, rotated tokens are saved atomically, and revoked consent makes the pass fail with an actionable `login` message in `status.json`.
+
+On a headless server, run the setup command over SSH with a loopback tunnel, then open the printed URL in your local browser:
+
+```sh
+ssh -L 8765:127.0.0.1:8765 -L 8766:127.0.0.1:8766 user@server
+```
+
+`restart: unless-stopped` brings the watcher back whenever the Docker runtime starts. Enable the runtime at login or boot: Docker Desktop → Settings → General → *Start Docker Desktop when you sign in* on macOS and Windows, `systemctl enable docker` on Linux. Do not add a launchd or systemd unit for the container itself; a second supervisor competes with Docker's restart policy.
+
+The image contains only the application and its dependencies. `.dockerignore` is a whitelist, so environment files, credentials, state and archives never enter the build context; mount them at run time. Bind mounts are written as the container's default user; on Linux add `user: "${UID}:${GID}"` to the service if you need host-owned files.
+
+Build and start locally with `docker compose up --build -d`. CI runs the Python checks; it does not build or publish Docker images, including on releases. Docker Hub secrets are not used.
 
 ## What gets archived
 
@@ -114,6 +141,7 @@ All runtime settings are documented in [`.env.example`](.env.example). Environme
 | `CALLIMACHUS_REQUIRE_COMPLETE` | `false` | Exit code 2 while any meeting is pending |
 | `CALLIMACHUS_GOOGLE_CLIENT_SECRET_FILE` | unset | Downloaded desktop OAuth JSON |
 | `CALLIMACHUS_GOOGLE_DRIVE_FOLDER_ID` | unset | Optional folder accessible to this OAuth app |
+| `CALLIMACHUS_OAUTH_BIND` | `127.0.0.1` | Callback listener address for `login`; `0.0.0.0` inside a container |
 
 For an alternate dotenv file, put the option before the command:
 

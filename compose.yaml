@@ -1,0 +1,33 @@
+# Source-based distribution: Compose builds the image locally.
+# Setup (one-off, host browser): docker compose run --rm --service-ports setup login wispr
+#                                docker compose run --rm --service-ports setup login drive
+# Watcher:                       docker compose up -d
+# Values come from ./.env (read by Compose) or the shell; paths inside the container are fixed.
+x-callimachus: &callimachus
+  build: .
+  environment:
+    CALLIMACHUS_DESTINATION: ${CALLIMACHUS_DESTINATION:-local}
+    CALLIMACHUS_POLL_INTERVAL: ${CALLIMACHUS_POLL_INTERVAL:-300}
+    CALLIMACHUS_TIMEZONE: ${CALLIMACHUS_TIMEZONE:-UTC}
+    CALLIMACHUS_REQUIRE_COMPLETE: ${CALLIMACHUS_REQUIRE_COMPLETE:-false}
+    CALLIMACHUS_RESTORE_DELETED: ${CALLIMACHUS_RESTORE_DELETED:-false}
+    CALLIMACHUS_GOOGLE_DRIVE_FOLDER_ID: ${CALLIMACHUS_GOOGLE_DRIVE_FOLDER_ID:-}
+    CALLIMACHUS_STATE_DIR: /state
+    CALLIMACHUS_ARCHIVE_DIR: /archive
+    CALLIMACHUS_GOOGLE_CLIENT_SECRET_FILE: /credentials/google-client.json
+    CALLIMACHUS_OAUTH_BIND: 0.0.0.0
+  volumes:
+    - ./.callimachus:/state          # credentials, registries, status: survive container replacement
+    - ./archive:/archive             # local destination; unused in Drive mode
+    - ./credentials:/credentials:ro  # desktop OAuth client JSON for Drive
+
+services:
+  callimachus:  # the watcher: no published ports, never opens a browser
+    <<: *callimachus
+    restart: unless-stopped
+  setup:        # interactive login; ports are published on the host loopback only
+    <<: *callimachus
+    profiles: [setup]
+    ports:
+      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:8766:8766"

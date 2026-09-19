@@ -1,7 +1,9 @@
 """Explicit browser login; background commands never prompt for authorization."""
 
 import asyncio
+import json
 import secrets
+import time
 import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
@@ -18,6 +20,7 @@ from .errors import UserError
 
 WISPR_URL = "https://api.wisprflow.ai/connect/mcp"
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+WISPR_PORT, DRIVE_PORT = 8765, 8766  # fixed loopback callback ports, also for container setup
 
 
 class TokenFiles:
@@ -33,7 +36,16 @@ class TokenFiles:
         return self.read("wispr-token.json", OAuthToken)
 
     async def set_tokens(self, tokens):
-        atomic_write(self.root / "wispr-token.json", tokens.model_dump_json().encode())
+        # The SDK forgets expiry across processes; keep it next to the token so a cold start
+        # refreshes an expired access token instead of demanding a new browser login.
+        data = json.loads(tokens.model_dump_json())
+        if tokens.expires_in:
+            data["expires_at"] = time.time() + tokens.expires_in
+        atomic_write(self.root / "wispr-token.json", json.dumps(data).encode())
+
+    def expires_at(self) -> float | None:
+        path = self.root / "wispr-token.json"
+        return json.loads(path.read_text()).get("expires_at") if path.exists() else None
 
     async def get_client_info(self):
         return self.read("wispr-client.json", OAuthClientInformationFull)
@@ -43,13 +55,16 @@ class TokenFiles:
 
 
 class Callback:
-    def __init__(self, port=8765):
-        self.port = port
+    """Loopback OAuth callback; bind may be 0.0.0.0 inside a container whose port is published
+    on the host loopback, while the advertised redirect URI stays 127.0.0.1."""
+
+    def __init__(self, port=WISPR_PORT, bind="127.0.0.1"):
+        self.port, self.bind = port, bind
         self.expected_state = None
 
     async def __aenter__(self):
         self.result = asyncio.get_running_loop().create_future()
-        self.server = await asyncio.start_server(self.handle, "127.0.0.1", self.port, limit=8192)
+        self.server = await asyncio.start_server(self.handle, self.bind, self.port, limit=8192)
         port = self.server.sockets[0].getsockname()[1]
         self.url = f"http://127.0.0.1:{port}/callback"
         return self
@@ -98,40 +113,52 @@ class Callback:
 
     async def redirect(self, url):
         self.expected_state = parse_qs(urlparse(url).query)["state"][0]
-        print("Opening Wispr authorization in your browser…", flush=True)
-        if not webbrowser.open(url):
-            raise UserError("Cannot open browser; run login wispr from an interactive desktop")
+        print(f"Open this URL in your browser to authorize Wispr:\n{url}", flush=True)
+        if self.bind == "127.0.0.1":
+            webbrowser.open(url)  # best effort; the printed URL is the supported path
 
     async def receive(self):
         return await asyncio.wait_for(self.result, timeout=300)
 
 
-@asynccontextmanager
-async def connect_wispr(state: Path, interactive=False):
-    storage = TokenFiles(state)
-    if not interactive and await storage.get_tokens() is None:
-        raise UserError("Wispr credentials missing; run callimachus login wispr")
+class ExpiryAwareProvider(OAuthClientProvider):
+    """Restore the persisted token expiry on cold start so the SDK refreshes proactively."""
 
+    async def _initialize(self) -> None:
+        await super()._initialize()
+        self.context.token_expiry_time = self.context.storage.expires_at()
+
+
+def wispr_provider(storage: TokenFiles, callback: Callback | None) -> OAuthClientProvider:
     async def login_required(*args):
         raise UserError("Wispr authorization expired; run callimachus login wispr")
 
+    return ExpiryAwareProvider(
+        server_url=WISPR_URL,
+        client_metadata=OAuthClientMetadata(
+            client_name="Callimachus",
+            redirect_uris=[f"http://127.0.0.1:{WISPR_PORT}/callback"],
+            token_endpoint_auth_method="none",
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+        ),
+        storage=storage,
+        redirect_handler=callback.redirect if callback else login_required,
+        callback_handler=callback.receive if callback else login_required,
+    )
+
+
+@asynccontextmanager
+async def connect_wispr(state: Path, interactive=False, bind="127.0.0.1"):
+    storage = TokenFiles(state)
+    if not interactive and await storage.get_tokens() is None:
+        raise UserError("Wispr credentials missing; run callimachus login wispr")
     async with AsyncExitStack() as stack:
-        callback = await stack.enter_async_context(Callback()) if interactive else None
-        auth = OAuthClientProvider(
-            server_url=WISPR_URL,
-            client_metadata=OAuthClientMetadata(
-                client_name="Callimachus",
-                redirect_uris=["http://127.0.0.1:8765/callback"],
-                token_endpoint_auth_method="none",
-                grant_types=["authorization_code", "refresh_token"],
-                response_types=["code"],
-            ),
-            storage=storage,
-            redirect_handler=callback.redirect if callback else login_required,
-            callback_handler=callback.receive if callback else login_required,
-        )
+        callback = await stack.enter_async_context(Callback(bind=bind)) if interactive else None
         client = await stack.enter_async_context(
-            httpx.AsyncClient(auth=auth, timeout=60, follow_redirects=True)
+            httpx.AsyncClient(
+                auth=wispr_provider(storage, callback), timeout=60, follow_redirects=True
+            )
         )
         read, write, _ = await stack.enter_async_context(
             streamable_http_client(WISPR_URL, http_client=client)
@@ -141,7 +168,9 @@ async def connect_wispr(state: Path, interactive=False):
         yield session
 
 
-def drive_service(state: Path, client_file: Path | None = None, interactive=False):
+def drive_service(
+    state: Path, client_file: Path | None = None, interactive=False, bind="127.0.0.1"
+):
     from google.auth.exceptions import RefreshError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -168,6 +197,12 @@ def drive_service(state: Path, client_file: Path | None = None, interactive=Fals
         if client_file is None or not client_file.is_file():
             raise UserError("Set CALLIMACHUS_GOOGLE_CLIENT_SECRET_FILE to your desktop OAuth JSON")
         flow = InstalledAppFlow.from_client_secrets_file(str(client_file), DRIVE_SCOPES)
-        credentials = flow.run_local_server(port=0, timeout_seconds=300)
+        credentials = flow.run_local_server(
+            host="127.0.0.1",
+            bind_addr=bind,
+            port=DRIVE_PORT,
+            open_browser=bind == "127.0.0.1",
+            timeout_seconds=300,
+        )
         atomic_write(path, credentials.to_json().encode())
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
