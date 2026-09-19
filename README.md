@@ -112,6 +112,18 @@ Wispr is authoritative for content: source edits overwrite the current files, an
 
 Deleting a file or folder in the archive is respected: it is recorded in the private registry and not recreated, even after source edits, renames or restarts (`suppressed` in the sync output). Set `CALLIMACHUS_RESTORE_DELETED=true` to recreate deleted material from the source on the next sync. Manually renaming or moving folders is unsupported; the application treats a missing folder as deleted.
 
+### Migrating an archive from earlier versions
+
+Earlier versions stored `meetings/<hash>/revisions/<hash>/` directories. `sync` refuses such a directory until you migrate it explicitly, with the watcher stopped:
+
+```sh
+uv run callimachus migrate                      # preview: targets, pending or corrupt entries, cleanup candidates
+uv run callimachus migrate --apply              # convert the current revision of every meeting; safe to rerun
+uv run callimachus migrate --apply --cleanup    # remove verified legacy directories, park the rest in .legacy/
+```
+
+Conversion goes through the normal import policy, so names, collisions and identity match a fresh import, and meetings that Wispr has since deleted are converted too. In Drive mode the legacy local staging archive is the source and the readable folders are created in Drive; old Drive revision folders are not reused, so links to them do not survive. Only complete text is converted: entries missing a summary or transcript, corrupt manifests, attached recordings and unknown files are never deleted. Cleanup removes a legacy directory only after its converted files were verified byte for byte, and moves everything else to `.legacy/` inside the archive so `sync` can run; exit code 2 means something there needs your review.
+
 Technical state (meeting identity, folder names, publication and deletion markers) lives in `CALLIMACHUS_STATE_DIR/registry.json` for the local destination and `drive-registry.json` plus `drive-objects.json` for Drive, never inside the archive. **Back it up with the archive**: it holds your deletion intent, and losing it is not a supported silent reset. Archives created by earlier versions in the `meetings/<hash>/revisions` layout are detected and must be migrated explicitly before syncing into the same directory.
 
 ## Add a recording

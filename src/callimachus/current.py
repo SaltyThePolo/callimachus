@@ -38,10 +38,10 @@ def folder_name(start: str, title: str, tz: ZoneInfo) -> str:
 class LocalStore:
     """Filesystem destination: one directory per meeting under the archive root."""
 
-    def __init__(self, root: Path):
-        if any(root.glob("meetings/*/latest.json")):
+    def __init__(self, root: Path, migrating: bool = False):
+        if not migrating and any(root.glob("meetings/*/latest.json")):
             raise UserError(
-                "Legacy revision archive detected; run the migration before syncing here"
+                "Legacy revision archive detected; run `callimachus migrate` before syncing here"
             )
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.root = root

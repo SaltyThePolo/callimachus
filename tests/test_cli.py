@@ -255,7 +255,7 @@ def test_legacy_revision_archive_requires_explicit_migration(tmp_path):
     legacy.mkdir(parents=True)
     (legacy / "latest.json").write_text("{}")
     result = run(tmp_path, "sync", "--input", fixture(tmp_path))
-    assert result.returncode == 1 and "migration" in result.stderr
+    assert result.returncode == 1 and "migrate" in result.stderr
     visible = [p.name for p in (tmp_path / "archive").iterdir() if not p.name.startswith(".")]
     assert visible == ["meetings"], "nothing written next to the legacy archive"
 

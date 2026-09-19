@@ -13,6 +13,7 @@ from pathlib import Path
 
 from filelock import FileLock, Timeout
 
+from . import migrate
 from .archive import atomic_write, canonical
 from .auth import connect_wispr, drive_service
 from .config import Config
@@ -35,6 +36,13 @@ def parser():
     )
     attach.add_argument("meeting_id")
     attach.add_argument("file", type=Path)
+    migrate = commands.add_parser(
+        "migrate", help="Preview or convert a legacy revision archive to readable folders"
+    )
+    migrate.add_argument("--apply", action="store_true", help="Convert (preview is the default)")
+    migrate.add_argument(
+        "--cleanup", action="store_true", help="After --apply, remove verified legacy directories"
+    )
     for name in ("sync", "watch"):
         cmd = commands.add_parser(
             name, help="Archive once" if name == "sync" else "Continuously archive"
@@ -120,13 +128,17 @@ async def meetings(config, args, skip):
             yield meeting
 
 
-async def sync(config, args):
+def current_archive(config, migrating=False):
     if config.destination == "drive":
         store = DriveStore(drive_service(config.state), config.state, config.google_folder)
         registry = config.state / "drive-registry.json"
     else:
-        store, registry = LocalStore(config.archive), config.state / "registry.json"
-    archive = CurrentArchive(store, registry, config.timezone, config.restore)
+        store, registry = LocalStore(config.archive, migrating), config.state / "registry.json"
+    return CurrentArchive(store, registry, config.timezone, config.restore)
+
+
+async def sync(config, args):
+    archive = current_archive(config)
     archive.reconcile()
     counts = {"imported": 0, "unchanged": 0, "pending": 0, "suppressed": 0}
 
@@ -255,6 +267,13 @@ def main():
             if args.command == "attach-audio":
                 attach_audio(config, args.meeting_id, args.file)
                 return 0
+            if args.command == "migrate":
+                config.archive.mkdir(parents=True, exist_ok=True, mode=0o700)
+                with FileLock(str(config.archive / ".writer.lock"), timeout=0):
+                    archive = current_archive(config, migrating=True)
+                    return migrate.run(
+                        config.archive, archive, args.apply, args.apply and args.cleanup
+                    )
             return run_sync(config, args)
     except KeyboardInterrupt:
         return 130
