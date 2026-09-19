@@ -142,6 +142,7 @@ All runtime settings are documented in [`.env.example`](.env.example). Environme
 | `CALLIMACHUS_GOOGLE_CLIENT_SECRET_FILE` | unset | Downloaded desktop OAuth JSON |
 | `CALLIMACHUS_GOOGLE_DRIVE_FOLDER_ID` | unset | Optional folder accessible to this OAuth app |
 | `CALLIMACHUS_OAUTH_BIND` | `127.0.0.1` | Callback listener address for `login`; `0.0.0.0` inside a container |
+| `CALLIMACHUS_DEBUG` | unset | `1` writes the full traceback of a failed command to `CALLIMACHUS_STATE_DIR/last-error.log` |
 
 For an alternate dotenv file, put the option before the command:
 
@@ -150,7 +151,7 @@ uv run callimachus --env-file /absolute/path/callimachus.env sync
 uv run callimachus doctor
 ```
 
-`doctor` checks local credential-file presence and prints the outcome of the last pass from `CALLIMACHUS_STATE_DIR/status.json` (time, ok or failed, counts or error category); it does not verify remote authorization. The status file never contains meeting text or tokens. `sync` exits 0 after successful delivery (including partial archives by default), 1 on configuration/access/integrity/transfer errors, and 2 for strict completeness failure. Ctrl+C exits 130. `watch` logs operational error categories and retries with increasing delay, up to one hour; credentials requiring fresh consent must be renewed with `login`. Locks are released between polling passes, allowing login and doctor while the watcher sleeps. If a pass is active, retry the command after that pass. Strict completeness mode stops the watcher with exit code 2 on incomplete archives.
+`doctor` checks local credential-file presence and prints the outcome of the last pass from `CALLIMACHUS_STATE_DIR/status.json` (time, ok or failed, counts or error category); it does not verify remote authorization. The status file never contains meeting text or tokens. Errors are printed to stderr as `Error: <message>`; with `CALLIMACHUS_DEBUG=1` the full traceback is also written to `CALLIMACHUS_STATE_DIR/last-error.log`, while stderr stays unchanged. That file can contain remote response bodies, URLs and meeting content: keep it private and never attach it to an issue. `sync` exits 0 after successful delivery (including partial archives by default), 1 on configuration/access/integrity/transfer errors, and 2 for strict completeness failure. Ctrl+C exits 130. `watch` logs operational error categories and retries with increasing delay, up to one hour; credentials requiring fresh consent must be renewed with `login`. Locks are released between polling passes, allowing login and doctor while the watcher sleeps. If a pass is active, retry the command after that pass. Strict completeness mode stops the watcher with exit code 2 on incomplete archives.
 
 Run only one writer per archive and Drive destination. Local locks prevent concurrent use of the same state/archive directories; they do not coordinate separate machines. Do not delete the state directory during a sync, and keep it private. Custom archive or credential locations should be outside this Git repository.
 
@@ -178,7 +179,7 @@ uv run ruff format --check src tests
 uv build
 ```
 
-Keep `CALLIMACHUS_DESTINATION=local` for the offline test. `--input` accepts a list of normalized meetings with `id`, `title`, timezone-aware `start`, `notes`, `summary`, and `transcript` (string or null), plus optional `end`, `modified_at`, `share_link`, and `attendees`. Input files must be trusted local files. Date filters are for the Wispr source, not JSON imports.
+Keep `CALLIMACHUS_DESTINATION=local` for the offline test. `--input` accepts a list of normalized meetings with `id`, `title`, timezone-aware `start`, `notes`, `summary`, and `transcript` (string or null), plus optional timezone-aware `end`, `modified_at`, `share_link`, and `attendees`. Unknown fields are rejected; a malformed meeting stops the import with `Error: <field>: <reason>` and exit code 1. Input files must be trusted local files. Date filters are for the Wispr source, not JSON imports.
 
 Tests use synthetic data and a fake Google API boundary; they do not access your accounts. Credentials, recordings and personal meeting content must never be submitted in issues or fixtures. See the [decision map](https://github.com/SaltyThePolo/callimachus/issues/1) for remaining integration validation.
 
