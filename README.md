@@ -182,13 +182,22 @@ Keep `CALLIMACHUS_DESTINATION=local` for the offline test. `--input` accepts a l
 
 Tests use synthetic data and a fake Google API boundary; they do not access your accounts. Credentials, recordings and personal meeting content must never be submitted in issues or fixtures. See the [decision map](https://github.com/SaltyThePolo/callimachus/issues/1) for remaining integration validation.
 
-A software license has not been selected yet; this repository currently makes no open-source license grant.
-
 ## Why “Callimachus”?
 
 Callimachus — Callimaco in Italian — was a Greek poet and scholar from Cyrene who worked in Alexandria in the third century BCE. His *Pinakes*, a bibliographic work in 120 books, organized the literary holdings associated with the Library of Alexandria. His poetry includes hymns, epigrams, and the *Aetia*.
 
 The name is a nod to that work of preserving and organizing knowledge: giving conversations an archive where they can be found again. See [AGNI / Boston University’s profile of Callimachus](https://agnionline.bu.edu/about/our-people/authors/callimachus/).
+
+## License
+
+Copyright (C) 2026 Mattia Riviera. Callimachus is licensed under
+[AGPL-3.0-only](LICENSE).
+
+Anyone running a modified version as a network service must make the modified
+source code available to its users under the same license.
+
+A separate commercial license is available on request from the copyright holder,
+Mattia Riviera.
 
 ---
 

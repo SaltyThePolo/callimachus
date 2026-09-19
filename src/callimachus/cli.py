@@ -1,3 +1,15 @@
+# Copyright (C) 2026 Mattia Riviera
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, version 3.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
+# General Public License for more details.
+
 import argparse
 import asyncio
 import json
@@ -7,6 +19,7 @@ import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from importlib.metadata import version
 from pathlib import Path
 
 from filelock import FileLock, Timeout
@@ -22,8 +35,18 @@ from .models import Meeting
 from .wispr import WisprSource, decode_result
 
 
+class VersionAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(
+            f"Callimachus {version('callimachus-archive')} — Copyright (C) 2026 Mattia Riviera. "
+            "License AGPLv3. This is free software with ABSOLUTELY NO WARRANTY."
+        )
+        parser.exit()
+
+
 def parser():
     root = argparse.ArgumentParser(description="Archive Wispr Flow meetings locally or to Drive")
+    root.add_argument("--version", action=VersionAction, nargs=0, help="Show version and license")
     root.add_argument("--env-file", type=Path, default=Path(".env"))
     commands = root.add_subparsers(dest="command", required=True)
     login = commands.add_parser("login", help="Authorize an account in your browser")
