@@ -140,3 +140,21 @@ def test_manually_moved_or_renamed_folder_is_reported_not_repaired(tmp_path):
     with pytest.raises(ValueError, match="manually"):
         archive(service, tmp_path).publish(MEETING)
     assert folder["name"] == "My own name" and len(service.items) == count
+
+
+def test_existing_legacy_root_folder_is_reused(tmp_path):
+    from callimachus.drive import DriveDestination
+
+    service = FakeDrive()
+    legacy_root = DriveDestination(
+        service, tmp_path / "state"
+    ).root()  # created by an earlier version
+    archive(service, tmp_path).publish(MEETING)
+    roots = [
+        i for i in service.items.values() if i["name"] == "Callimachus" and i["mimeType"] == FOLDER
+    ]
+    assert [r["id"] for r in roots] == [legacy_root], "no second Callimachus folder"
+    meeting_folder = next(
+        i for i in service.items.values() if i["name"] == "2026-09-19 10-00 - Demo"
+    )
+    assert meeting_folder["parents"] == [legacy_root]

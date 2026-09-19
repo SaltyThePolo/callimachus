@@ -292,8 +292,20 @@ class DriveStore:
                 raise UserError("Drive folder is unavailable to this OAuth app")
             self._root = self.folder_id
         else:
+            self._adopt_legacy_root()
             self._root = self._ensure(self._key("", "root"), "root", "Callimachus", None)[0]["id"]
         return self._root
+
+    def _adopt_legacy_root(self) -> None:
+        """Reuse the Callimachus folder an earlier version created instead of making a second one."""
+        key, legacy_file = self._key("", "root"), self.ids_file.with_name("drive-ids.json")
+        if key in self.ids or not legacy_file.exists():
+            return
+        legacy_key = hashlib.sha256(canonical([None, "Callimachus"])).hexdigest()
+        folder = self._get(json.loads(legacy_file.read_text()).get(legacy_key))
+        if folder and not folder.get("trashed") and folder.get("mimeType") == FOLDER:
+            self.ids[key] = folder["id"]
+            atomic_write(self.ids_file, canonical(self.ids))
 
     # -- store interface used by CurrentArchive ------------------------------------------------
     def names(self) -> set[str]:
