@@ -1,4 +1,5 @@
 import hashlib
+import re
 
 import pytest
 from googleapiclient.errors import HttpError
@@ -37,16 +38,40 @@ class FakeDrive:
         self.counter += 1
         return Request(lambda: {"ids": [f"remote-{self.counter}"]})
 
+    def trashed(self, item):
+        """Drive reports children of a trashed folder as trashed."""
+        while item is not None:
+            if item.get("trashed"):
+                return True
+            parents = [p for p in item.get("parents", []) if p in self.items]
+            item = self.items[parents[0]] if parents else None
+        return False
+
     def get(self, fileId, **kwargs):
         def run():
             if fileId not in self.items:
                 raise HttpError(Response({"status": "404"}), b"missing")
-            return self.items[fileId].copy()
+            return self.items[fileId] | {"trashed": self.trashed(self.items[fileId])}
 
         return Request(run)
 
-    def list(self, **kwargs):
-        return Request(lambda: {"files": []})
+    def list(self, q="", **kwargs):
+        def matches(item):
+            parent = re.search(r"'([^']+)' in parents", q)
+            key = re.search(r"key='callimachus_key' and value='([^']+)'", q)
+            return (
+                (not parent or parent.group(1) in item.get("parents", []))
+                and (
+                    not key or item.get("appProperties", {}).get("callimachus_key") == key.group(1)
+                )
+                and ("trashed = false" not in q or not self.trashed(item))
+                and (
+                    "mimeType = '" not in q
+                    or item.get("mimeType") == re.search(r"mimeType = '([^']+)'", q).group(1)
+                )
+            )
+
+        return Request(lambda: {"files": [i.copy() for i in self.items.values() if matches(i)]})
 
     def create(self, body, media_body=None, **kwargs):
         def run():
@@ -69,8 +94,12 @@ class FakeDrive:
 
     def update(self, fileId, body, media_body=None, **kwargs):
         def run():
-            content = media_body.getbytes(0, media_body.size())
-            self.items[fileId].update(body | {"md5Checksum": hashlib.md5(content).hexdigest()})
+            if self.items[fileId]["name"] == self.fail_name:
+                raise OSError("synthetic disconnect")
+            self.items[fileId].update(body)
+            if media_body is not None:
+                content = media_body.getbytes(0, media_body.size())
+                self.items[fileId]["md5Checksum"] = hashlib.md5(content).hexdigest()
             self.writes.append(self.items[fileId]["name"])
             return self.items[fileId].copy()
 

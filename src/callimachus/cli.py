@@ -13,11 +13,10 @@ from pathlib import Path
 
 from filelock import FileLock
 
-from .archive import Archive
 from .auth import connect_wispr, drive_service
 from .config import Config
-from .current import CurrentArchive
-from .drive import DriveDestination
+from .current import CurrentArchive, LocalStore
+from .drive import DriveStore
 from .errors import UserError
 from .models import Meeting
 from .wispr import WisprSource, decode_result
@@ -117,33 +116,27 @@ async def meetings(config, args):
 
 async def sync(config, args):
     if config.destination == "drive":
-        return await sync_drive(config, args)
-    archive = CurrentArchive(config.archive, config.state, config.timezone, config.restore)
+        store = DriveStore(drive_service(config.state), config.state, config.google_folder)
+        registry = config.state / "drive-registry.json"
+    else:
+        store, registry = LocalStore(config.archive), config.state / "registry.json"
+    archive = CurrentArchive(store, registry, config.timezone, config.restore)
     archive.reconcile()
     counts = {"imported": 0, "pending": 0, "suppressed": 0}
     async for meeting in meetings(config, args):
         counts[archive.publish(meeting)] += 1
-    print(" ".join(f"{k}={v}" for k, v in counts.items()) + " destination=local", flush=True)
+    summary = " ".join(f"{k}={v}" for k, v in counts.items())
+    print(f"{summary} destination={config.destination}", flush=True)
     return 2 if counts["pending"] and config.require_complete else 0
 
 
-async def sync_drive(config, args):
-    # ponytail: legacy revision layout with local staging until the Drive ticket lands.
-    store = Archive(config.archive)
-    drive = DriveDestination(drive_service(config.state), config.state, config.google_folder)
-    # Deliver historical revisions even if their source was changed or deleted.
-    drive.drain(store)
-    total, partial = 0, 0
-    async for meeting in meetings(config, args):
-        attachments = list((config.state / "audio" / meeting.key).glob("recording.*"))
-        if len(attachments) > 1:
-            raise UserError("Multiple recording attachments found; attach the intended file again")
-        result = store.save(meeting, attachments[0] if attachments else None)
-        drive.upload(result)
-        total += 1
-        partial += not result.complete
-    print(f"archived={total} partial={partial} destination=drive", flush=True)
-    return 2 if partial and config.require_complete else 0
+def run_sync(config, args):
+    """One synchronization pass; the local archive directory is protected by its own lock."""
+    if config.destination == "drive":
+        return asyncio.run(sync(config, args))
+    config.archive.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with FileLock(str(config.archive / ".writer.lock"), timeout=0):
+        return asyncio.run(sync(config, args))
 
 
 def report_error(exc):
@@ -165,13 +158,11 @@ def report_error(exc):
 
 
 def watch(config, args):
-    config.archive.mkdir(parents=True, exist_ok=True, mode=0o700)
     delay = config.interval
     while True:
         try:
             with FileLock(str(config.state / "process.lock"), timeout=0):
-                with FileLock(str(config.archive / ".writer.lock"), timeout=0):
-                    result = asyncio.run(sync(config, args))
+                result = run_sync(config, args)
             if result == 2:
                 return 2
             delay = config.interval
@@ -220,16 +211,14 @@ def main():
                     asyncio.run(login())
                 else:
                     service = drive_service(config.state, config.google_client, interactive=True)
-                    folder = DriveDestination(service, config.state, config.google_folder).root()
+                    folder = DriveStore(service, config.state, config.google_folder).root()
                     print(f"Drive archive: https://drive.google.com/drive/folders/{folder}")
                 print("Authorization saved locally.")
                 return 0
             if args.command == "attach-audio":
                 attach_audio(config, args.meeting_id, args.file)
                 return 0
-            config.archive.mkdir(parents=True, exist_ok=True, mode=0o700)
-            with FileLock(str(config.archive / ".writer.lock"), timeout=0):
-                return asyncio.run(sync(config, args))
+            return run_sync(config, args)
     except KeyboardInterrupt:
         return 130
     except Exception as exc:

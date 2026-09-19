@@ -2,7 +2,7 @@
 
 **Give your meetings a lasting home.**
 
-Callimachus is a Python CLI that archives finalized **Wispr Flow Notetaker** meetings to a local directory and, optionally, directly to **Google Drive through its API**.
+Callimachus is a Python CLI that archives finalized **Wispr Flow Notetaker** meetings to a local directory or directly to **Google Drive through its API**, as readable per-meeting folders that stay current with Wispr.
 
 It reads notes, summaries and full paginated transcripts into readable per-meeting folders, keeps them current with Wispr, and can run continuously. It does not require an LLM or a Google Drive desktop client.
 
@@ -55,7 +55,9 @@ uv run callimachus sync
 uv run callimachus watch
 ```
 
-By default, login creates a private **Callimachus** folder in your Drive and prints its link. The app requests the `drive.file` scope, which limits access to files available to this OAuth app. It never changes sharing permissions.
+By default, login creates a private **Callimachus** folder in your Drive and prints its link. Meeting folders are created inside it with the same readable layout as the local destination; Drive mode keeps no local copy of the meeting content, only credentials and the private registries under `CALLIMACHUS_STATE_DIR`. Each object keeps a stable Drive ID across updates and renames, so links to a meeting folder survive source edits.
+
+Drive has no transaction spanning the three files. If a sync is interrupted between uploads, a folder can briefly hold a mix of old and new files; the meeting is marked synchronized only after all three writes succeed, and the next sync completes it. Folders or files you trash in Drive stay trashed unless `CALLIMACHUS_RESTORE_DELETED=true`, in which case fresh objects are created. Manually renaming or moving a Callimachus folder inside Drive is unsupported and reported as an error until you restore it or trash it. The app requests the `drive.file` scope, which limits access to files available to this OAuth app. It never changes sharing permissions.
 
 `CALLIMACHUS_GOOGLE_DRIVE_FOLDER_ID` optionally selects an existing folder **already accessible to this OAuth app**. Merely pasting an arbitrary folder ID does not grant access under `drive.file`; leaving this setting blank is the supported simplest setup. A Google Picker flow is not included.
 
@@ -80,9 +82,7 @@ Wispr is authoritative for content: source edits overwrite the current files, an
 
 Deleting a file or folder in the archive is respected: it is recorded in the private registry and not recreated, even after source edits, renames or restarts (`suppressed` in the sync output). Set `CALLIMACHUS_RESTORE_DELETED=true` to recreate deleted material from the source on the next sync. Manually renaming or moving folders is unsupported; the application treats a missing folder as deleted.
 
-Technical state (meeting identity, folder names, publication and deletion markers) lives in `CALLIMACHUS_STATE_DIR/registry.json`, never inside the archive. **Back it up with the archive**: it holds your deletion intent, and losing it is not a supported silent reset. Archives created by earlier versions in the `meetings/<hash>/revisions` layout are detected and must be migrated explicitly before syncing into the same directory.
-
-The Drive destination still uses the previous immutable-revision layout with a local staging archive until it is moved to the readable layout.
+Technical state (meeting identity, folder names, publication and deletion markers) lives in `CALLIMACHUS_STATE_DIR/registry.json` for the local destination and `drive-registry.json` plus `drive-objects.json` for Drive, never inside the archive. **Back it up with the archive**: it holds your deletion intent, and losing it is not a supported silent reset. Archives created by earlier versions in the `meetings/<hash>/revisions` layout are detected and must be migrated explicitly before syncing into the same directory.
 
 ## Add a recording
 
@@ -93,7 +93,7 @@ uv run callimachus attach-audio '<meeting-id>' '/path/to/recording.m4a'
 uv run callimachus sync
 ```
 
-The command copies the file into private local state. Drive delivery includes it in the meeting archive; the readable local layout is text-only and never deletes attached audio. Supported extensions: `.wav`, `.mp3`, `.m4a`, `.mp4`, `.ogg`, `.webm`, `.flac`, `.aac`. This is a manual association, not automatic extraction from Wispr.
+The command copies the file into private local state. The readable layout is text-only: attached audio is kept privately and never deleted, but not published to either destination. Supported extensions: `.wav`, `.mp3`, `.m4a`, `.mp4`, `.ogg`, `.webm`, `.flac`, `.aac`. This is a manual association, not automatic extraction from Wispr.
 
 Wispr documents that uploaded audio is deleted after processing and local audio is retained for approximately 24 hours. Preserve audio through a supported export path if one is available to you. See the [integration research](docs/research/wispr-integration.md).
 
@@ -104,7 +104,7 @@ All runtime settings are documented in [`.env.example`](.env.example). Environme
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `CALLIMACHUS_DESTINATION` | `local` | `local` or direct API `drive` |
-| `CALLIMACHUS_ARCHIVE_DIR` | `./archive` | Local archive, retained in Drive mode too |
+| `CALLIMACHUS_ARCHIVE_DIR` | `./archive` | Local archive; unused in Drive mode |
 | `CALLIMACHUS_STATE_DIR` | `./.callimachus` | Credentials, registry, attached audio, locks and Drive IDs |
 | `CALLIMACHUS_TIMEZONE` | `UTC` | IANA timezone used in folder names |
 | `CALLIMACHUS_RESTORE_DELETED` | `false` | Recreate files and folders you deleted from the archive |
