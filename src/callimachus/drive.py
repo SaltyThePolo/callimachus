@@ -75,62 +75,65 @@ class DriveDestination:
             atomic_write(self.registry_file, canonical(self.registry))
         return self.registry[key], key
 
-    def _put(self, parent: str | None, name: str, path: Path | None = None) -> str:
+    @staticmethod
+    def _check(existing: dict, key: str, parent: str | None) -> None:
+        if (
+            existing.get("trashed")
+            or existing.get("appProperties", {}).get("callimachus_key") != key
+        ):
+            raise UserError("Drive archive object was removed or replaced; resolve before syncing")
+        if parent and parent not in existing.get("parents", []):
+            raise UserError("Drive archive object was moved; restore it before syncing")
+
+    def _folder(self, parent: str | None, name: str) -> str:
+        """Get or create an archive folder; folders are never modified."""
         remote_id, key = self._id(parent, name)
         existing = self._get(remote_id)
-        props = {"callimachus_key": key}
-        if path is not None:
-            props["sha256"] = checksum(path)
         if existing:
-            if (
-                existing.get("trashed")
-                or existing.get("appProperties", {}).get("callimachus_key") != key
-            ):
-                raise UserError(
-                    "Drive archive object was removed or replaced; resolve before syncing"
-                )
-            if parent and parent not in existing.get("parents", []):
-                raise UserError("Drive archive object was moved; restore it before syncing")
-            if path is None:
-                if existing.get("mimeType") != FOLDER:
-                    raise UserError("Expected an archive folder in Drive")
-                return remote_id
+            self._check(existing, key, parent)
+            if existing.get("mimeType") != FOLDER:
+                raise UserError("Expected an archive folder in Drive")
+            return remote_id
+        body = {
+            "id": remote_id,
+            "name": name,
+            "mimeType": FOLDER,
+            "appProperties": {"callimachus_key": key},
+        }
+        if parent:
+            body["parents"] = [parent]
+        self.files.create(body=body, fields="id", supportsAllDrives=True).execute(num_retries=3)
+        return remote_id
+
+    def _file(self, parent: str, name: str, path: Path, *, mutable: bool = False) -> str:
+        """Upload unless Drive holds identical content; only a mutable file may be replaced."""
+        remote_id, key = self._id(parent, name)
+        existing = self._get(remote_id)
+        if existing:
+            self._check(existing, key, parent)
             with path.open("rb") as stream:
                 md5 = hashlib.file_digest(stream, "md5").hexdigest()
             if existing.get("md5Checksum") == md5:
                 return remote_id
-            # Immutable revisions are never overwritten if changed externally.
-            if name != "latest.json":
+            if not mutable:
                 raise UserError("Drive archive integrity mismatch; restore the remote revision")
-        body = {"name": name, "appProperties": props}
-        media = None
-        if path is None:
-            body["mimeType"] = FOLDER
-        else:
-            media = MediaFileUpload(
-                str(path),
-                mimetype=mimetypes.guess_type(name)[0] or "application/octet-stream",
-                resumable=True,
-                chunksize=8 * 1024 * 1024,
-            )
+        body = {"name": name, "appProperties": {"callimachus_key": key, "sha256": checksum(path)}}
+        mimetype = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        media = MediaFileUpload(
+            str(path), mimetype=mimetype, resumable=True, chunksize=8 * 1024 * 1024
+        )
         if existing:
             request = self.files.update(
                 fileId=remote_id, body=body, media_body=media, fields="id", supportsAllDrives=True
             )
         else:
-            body["id"] = remote_id
-            if parent:
-                body["parents"] = [parent]
-            kwargs = {"body": body, "fields": "id", "supportsAllDrives": True}
-            if media:
-                kwargs["media_body"] = media
-            request = self.files.create(**kwargs)
-        if media:
-            result = None
-            while result is None:
-                _, result = request.next_chunk(num_retries=3)
-        else:
-            request.execute(num_retries=3)
+            body |= {"id": remote_id, "parents": [parent]}
+            request = self.files.create(
+                body=body, media_body=media, fields="id", supportsAllDrives=True
+            )
+        result = None
+        while result is None:
+            _, result = request.next_chunk(num_retries=3)
         return remote_id
 
     def root(self) -> str:
@@ -141,7 +144,7 @@ class DriveDestination:
             if not folder or folder.get("mimeType") != FOLDER or folder.get("trashed"):
                 raise UserError("Drive folder is unavailable to this OAuth app")
             return self.folder_id
-        return self._put(None, "Callimachus")
+        return self._folder(None, "Callimachus")
 
     def upload(self, saved: SavedArchive, publish=True) -> str:
         metadata = validate_revision(saved.path)
@@ -155,14 +158,14 @@ class DriveDestination:
             ):
                 raise UserError("Archive manifest integrity mismatch")
         root = self.root()
-        meetings = self._put(root, "meetings")
-        meeting = self._put(meetings, saved.key)
-        revisions = self._put(meeting, "revisions")
-        revision = self._put(revisions, saved.path.name)
+        meetings = self._folder(root, "meetings")
+        meeting = self._folder(meetings, saved.key)
+        revisions = self._folder(meeting, "revisions")
+        revision = self._folder(revisions, saved.path.name)
         for path in sorted(saved.path.iterdir()):
-            self._put(revision, path.name, path)
+            self._file(revision, path.name, path)
         if publish:
-            self._put(meeting, "latest.json", saved.manifest)
+            self._file(meeting, "latest.json", saved.manifest, mutable=True)
         return f"https://drive.google.com/drive/folders/{meeting}"
 
     def drain(self, archive: Archive) -> None:
