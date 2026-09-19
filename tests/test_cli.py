@@ -100,6 +100,26 @@ def test_credentials_validation_errors_are_not_printed(capsys):
     assert "remote secret" not in capsys.readouterr().err
 
 
+def test_exception_group_reports_every_user_error(capsys):
+    from callimachus.cli import report_error
+    from callimachus.errors import UserError
+
+    report_error(BaseExceptionGroup("sdk", [UserError("a"), UserError("b")]))
+    assert capsys.readouterr().err == "Error: a; b\n"
+
+
+def test_debug_switch_writes_traceback_to_state_not_stderr(tmp_path, monkeypatch, capsys):
+    from callimachus.cli import report_error
+
+    monkeypatch.setenv("CALLIMACHUS_DEBUG", "1")
+    try:
+        {}["missing"]
+    except KeyError as exc:
+        report_error(exc, tmp_path)
+    assert "Traceback" not in capsys.readouterr().err
+    assert "Traceback" in (tmp_path / "last-error.log").read_text()
+
+
 def test_watch_exits_on_strict_completeness_failure(tmp_path):
     result = run(
         tmp_path,
