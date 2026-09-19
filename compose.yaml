@@ -5,7 +5,12 @@
 # Values come from ./.env (read by Compose) or the shell; paths inside the container are fixed.
 x-callimachus: &callimachus
   build: .
+  # Run as the host user so mounted state and archive stay readable outside the container.
+  # On Linux set CALLIMACHUS_UID/GID in .env or the shell (id -u, id -g); create the mounted
+  # directories first, otherwise Docker creates them as root.
+  user: "${CALLIMACHUS_UID:-1000}:${CALLIMACHUS_GID:-1000}"
   environment:
+    HOME: /state
     CALLIMACHUS_DESTINATION: ${CALLIMACHUS_DESTINATION:-local}
     CALLIMACHUS_POLL_INTERVAL: ${CALLIMACHUS_POLL_INTERVAL:-300}
     CALLIMACHUS_TIMEZONE: ${CALLIMACHUS_TIMEZONE:-UTC}

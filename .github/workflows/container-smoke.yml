@@ -7,6 +7,9 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    env:
+      CALLIMACHUS_UID: "1001"  # the runner user, so the host can read what the container writes
+      CALLIMACHUS_GID: "1001"
     steps:
       - uses: actions/checkout@v4
       - run: docker compose build
@@ -19,7 +22,7 @@ jobs:
           grep -q "imported=1" second.log
           ls -la archive archive/*/
           test -f archive/*/transcript.md
-          sudo test -f .callimachus/registry.json
+          test -f .callimachus/registry.json
           docker compose run --rm setup doctor | tee doctor.log
           grep -q "last_pass=ok" doctor.log
       - name: Watcher publishes no ports, opens no browser, reports missing login

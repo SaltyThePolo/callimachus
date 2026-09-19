@@ -71,6 +71,7 @@ A local source build and one Compose file run the watcher unattended on macOS, W
 
 ```sh
 cp .env.example .env            # edit destination and Drive settings; Compose reads it
+mkdir -p .callimachus archive credentials
 docker compose build
 docker compose run --rm --service-ports setup login wispr
 docker compose run --rm --service-ports setup login drive   # Drive mode only
@@ -88,7 +89,7 @@ ssh -L 8765:127.0.0.1:8765 -L 8766:127.0.0.1:8766 user@server
 
 `restart: unless-stopped` brings the watcher back whenever the Docker runtime starts. Enable the runtime at login or boot: Docker Desktop → Settings → General → *Start Docker Desktop when you sign in* on macOS and Windows, `systemctl enable docker` on Linux. Do not add a launchd or systemd unit for the container itself; a second supervisor competes with Docker's restart policy.
 
-The image contains only the application and its dependencies. `.dockerignore` is a whitelist, so environment files, credentials, state and archives never enter the build context; mount them at run time. Bind mounts are written as the container's default user; on Linux add `user: "${UID}:${GID}"` to the service if you need host-owned files.
+The image contains only the application and its dependencies. `.dockerignore` is a whitelist, so environment files, credentials, state and archives never enter the build context; mount them at run time. The container runs as `CALLIMACHUS_UID:CALLIMACHUS_GID` (default `1000:1000`) so the mounted state and archive stay readable on the host; on Linux set them to your `id -u` and `id -g` in `.env`, and create `.callimachus/` and `archive/` before the first start so Docker does not create them as root.
 
 Build and start locally with `docker compose up --build -d`. CI runs the Python checks; it does not build or publish Docker images, including on releases. Docker Hub secrets are not used.
 
