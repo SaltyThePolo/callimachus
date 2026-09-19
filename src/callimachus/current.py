@@ -38,19 +38,12 @@ def folder_name(start: str, title: str, tz: ZoneInfo) -> str:
 class LocalStore:
     """Filesystem destination: one directory per meeting under the archive root."""
 
-    def __init__(self, root: Path, migrating: bool = False):
-        if not migrating and any(root.glob("meetings/*/latest.json")):
-            raise UserError(
-                "Legacy revision archive detected; run `callimachus migrate` before syncing here"
-            )
+    def __init__(self, root: Path):
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.root = root
 
     def names(self) -> set[str]:
         return {p.name.casefold() for p in self.root.iterdir() if p.is_dir()}
-
-    def exists(self, meeting_id: str, folder: str) -> bool:
-        return (self.root / folder).is_dir()
 
     def present(self, meeting_id: str, folder: str) -> dict[str, str] | None:
         path = self.root / folder
@@ -59,7 +52,10 @@ class LocalStore:
         return {n: md5((path / n).read_bytes()) for n in FILES if (path / n).is_file()}
 
     def rename(self, meeting_id: str, folder: str, new: str) -> None:
-        (self.root / folder).rename(self.root / new)
+        if (
+            self.root / folder
+        ).is_dir():  # idempotent: a finished or user-deleted folder is left alone
+            (self.root / folder).rename(self.root / new)
 
     def write(self, meeting_id: str, folder: str, name: str, data: bytes) -> None:
         atomic_write(self.root / folder / name, data)
@@ -84,7 +80,15 @@ class CurrentArchive:
         atomic_write(self.registry, canonical({"schema_version": 1, "meetings": self.meetings}))
 
     def _place(self, meeting_id: str, record: dict) -> str:
-        """Keep the folder named after the current start/title/timezone; rename in the store."""
+        """Keep the folder named after the current start/title/timezone; rename in the store.
+
+        A rename is two-phase: the new name and the previous one are saved before the store
+        moves anything, so a crash in between is finished on the next pass instead of being
+        mistaken for a user deletion.
+        """
+        if "previous" in record:
+            self.store.rename(meeting_id, record.pop("previous"), record["folder"])
+            self._save()
         base = folder_name(record["start"], record["title"], self.tz)
         old = record.get("folder")
         if old and record.get("base") == base:
@@ -101,9 +105,12 @@ class CurrentArchive:
             n += 1
             folder = f"{base} ({n})"
         record.update(base=base, folder=folder)
-        if old and old != folder and self.store.exists(meeting_id, old):
+        if old and old != folder:
+            record["previous"] = old
+            self._save()
             self.store.rename(meeting_id, old, folder)
-            self._save()  # a crash after the rename must not orphan the folder
+            del record["previous"]
+            self._save()
         return folder
 
     def reconcile(self) -> None:
@@ -142,16 +149,18 @@ class CurrentArchive:
                 deleted.add(WHOLE_FOLDER)
             else:
                 deleted |= FILES.keys() - present.keys()
-        if WHOLE_FOLDER in deleted and not self.restore:
+        if self.restore:
+            deleted = set()  # cleared for good only once the writes below have succeeded
+        if WHOLE_FOLDER in deleted:
             record["deleted"] = sorted(deleted)
             self._save()
             return "suppressed"
         for name, attr in FILES.items():
-            if name in deleted and not self.restore:
+            if name in deleted:
                 continue
             data = (getattr(meeting, attr) or "").encode()
             if (present or {}).get(name) != md5(data):
                 self.store.write(meeting.id, folder, name, data)
-        record.update(published=True, deleted=[] if self.restore else sorted(deleted))
+        record.update(published=True, deleted=sorted(deleted))
         self._save()
         return "imported"

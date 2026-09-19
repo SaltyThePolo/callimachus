@@ -114,26 +114,17 @@ class Callback:
     async def redirect(self, url):
         self.expected_state = parse_qs(urlparse(url).query)["state"][0]
         print(f"Open this URL in your browser to authorize Wispr:\n{url}", flush=True)
-        if self.bind == "127.0.0.1":
-            webbrowser.open(url)  # best effort; the printed URL is the supported path
+        webbrowser.open(url)  # best effort; the printed URL is the supported path
 
     async def receive(self):
         return await asyncio.wait_for(self.result, timeout=300)
-
-
-class ExpiryAwareProvider(OAuthClientProvider):
-    """Restore the persisted token expiry on cold start so the SDK refreshes proactively."""
-
-    async def _initialize(self) -> None:
-        await super()._initialize()
-        self.context.token_expiry_time = self.context.storage.expires_at()
 
 
 def wispr_provider(storage: TokenFiles, callback: Callback | None) -> OAuthClientProvider:
     async def login_required(*args):
         raise UserError("Wispr authorization expired; run callimachus login wispr")
 
-    return ExpiryAwareProvider(
+    provider = OAuthClientProvider(
         server_url=WISPR_URL,
         client_metadata=OAuthClientMetadata(
             client_name="Callimachus",
@@ -146,6 +137,10 @@ def wispr_provider(storage: TokenFiles, callback: Callback | None) -> OAuthClien
         redirect_handler=callback.redirect if callback else login_required,
         callback_handler=callback.receive if callback else login_required,
     )
+    # The SDK forgets expiry across processes; restore it so an expired access token is
+    # refreshed before the first request instead of triggering a browser login.
+    provider.context.token_expiry_time = storage.expires_at()
+    return provider
 
 
 @asynccontextmanager
@@ -201,7 +196,7 @@ def drive_service(
             host="127.0.0.1",
             bind_addr=bind,
             port=DRIVE_PORT,
-            open_browser=bind == "127.0.0.1",
+            open_browser=True,  # best effort; the flow prints the URL for the host browser
             timeout_seconds=300,
         )
         atomic_write(path, credentials.to_json().encode())

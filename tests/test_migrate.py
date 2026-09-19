@@ -119,7 +119,7 @@ def test_failed_verification_blocks_cleanup(tmp_path, monkeypatch):
     from callimachus.migrate import run as migrate_run
 
     config = Config.load(env)
-    assert migrate_run(root, current_archive(config, migrating=True), apply=True, cleanup=True) == 2
+    assert migrate_run(root, current_archive(config), apply=True, cleanup=True) == 2
     assert (root / ".legacy").is_dir() and not (root / "meetings").exists()
     assert len(list((root / ".legacy").iterdir())) == 1, (
         "unverified conversion keeps the legacy copy"
@@ -151,3 +151,18 @@ def test_drive_destination_is_migrated_from_the_local_staging_archive(tmp_path):
         "transcript.md",
     ]
     assert not list(root.glob("2026-*")), "Drive migration writes nothing readable locally"
+
+
+def test_unmanifested_legacy_entry_with_a_recording_is_parked_not_deleted(tmp_path):
+    root = legacy_archive(tmp_path)
+    orphan = root / "meetings" / "orphan" / "revisions" / "rev"
+    orphan.mkdir(parents=True)
+    (orphan / "recording.m4a").write_bytes(b"synthetic audio")
+    (root / "meetings" / "stray.txt").write_text("user file")
+    result = run(tmp_path, "migrate", "--apply", "--cleanup")
+    assert result.returncode == 2 and "no manifest" in result.stdout
+    assert not (root / "meetings").exists()
+    assert (
+        root / ".legacy" / "orphan" / "revisions" / "rev" / "recording.m4a"
+    ).read_bytes() == b"synthetic audio"
+    assert (root / ".legacy" / "stray.txt").read_text() == "user file"

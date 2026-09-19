@@ -35,8 +35,9 @@ class Item:
 
 def scan(root: Path) -> list[Item]:
     items = []
-    for manifest in sorted(root.glob("meetings/*/latest.json")):
-        item = Item(manifest.parent)
+    for entry in sorted(p for p in root.glob("meetings/*") if p.is_dir()):
+        item = Item(entry)
+        manifest = entry / "latest.json"
         item.extras = sorted(
             str(p.relative_to(item.path))
             for p in item.path.rglob("*")
@@ -125,12 +126,18 @@ def run(root: Path, archive: CurrentArchive, apply: bool, cleanup: bool) -> int:
     if cleanup:
         for item, _ in removable:
             shutil.rmtree(item.path)
-        if kept:
-            parked = root / PARKED
-            parked.mkdir(exist_ok=True)
-            for item, _ in kept:
-                item.path.rename(parked / item.path.name)
-        shutil.rmtree(root / "meetings", ignore_errors=True)
+        leftovers = [i.path for i, _ in kept] + [
+            p
+            for p in (root / "meetings").iterdir()
+            if not p.is_dir() and not p.name.startswith(".")
+        ]
+        if leftovers:  # never deleted: parked so sync can run and the user can review them
+            (root / PARKED).mkdir(exist_ok=True)
+            for path in leftovers:
+                path.rename(root / PARKED / path.name)
+        for stray in (root / "meetings").glob(".*"):
+            stray.unlink()
+        (root / "meetings").rmdir()  # fails loudly if anything unexpected is still there
         print(
             f"Removed {len(removable)} verified legacy meeting directories; {len(kept)} moved to {PARKED}/"
         )

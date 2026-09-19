@@ -104,8 +104,10 @@ def test_lost_create_response_and_lost_id_registry_do_not_duplicate_objects(tmp_
     archive(service, tmp_path).publish(MEETING)
     assert len(service.items) == 5
     (tmp_path / "state" / "drive-objects.json").unlink()  # local id registry lost
-    archive(service, tmp_path).publish(MEETING)
+    assert archive(service, tmp_path).publish(MEETING) == "imported", "not mistaken for a deletion"
     assert len(service.items) == 5, "objects recovered through appProperties, none recreated"
+    registry = json.loads((tmp_path / "state" / "drive-registry.json").read_text())
+    assert registry["meetings"]["meeting"]["deleted"] == []
 
 
 def test_trashed_file_stays_deleted_unless_restore_is_enabled(tmp_path):

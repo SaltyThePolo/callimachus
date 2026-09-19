@@ -51,18 +51,6 @@ def test_first_import_creates_readable_folder_with_three_markdown_files(tmp_path
     assert not list((tmp_path / "archive").rglob("*.json")), "no technical state in the archive"
 
 
-def test_attached_audio_does_not_gate_or_change_text_import(tmp_path):
-    source = fixture(tmp_path)
-    assert run(tmp_path, "sync", "--input", source).returncode == 0
-    audio = tmp_path / "audio.wav"
-    audio.write_bytes(b"synthetic bytes")
-    assert run(tmp_path, "attach-audio", "synthetic", str(audio)).returncode == 0
-    result = run(tmp_path, "sync", "--input", source)
-    assert result.returncode == 0 and "imported=1" in result.stdout
-    folder = tmp_path / "archive" / "2026-09-19 10-00 - Synthetic meeting"
-    assert sorted(p.name for p in folder.iterdir()) == ["notes.md", "summary.md", "transcript.md"]
-
-
 def test_strict_mode_returns_failure_for_pending_text(tmp_path):
     complete = fixture(tmp_path)
     assert (
@@ -132,9 +120,7 @@ def test_watch_releases_lock_between_passes(tmp_path):
         while not list((tmp_path / "archive").rglob("notes.md")) and time.monotonic() < deadline:
             time.sleep(0.1)
         time.sleep(0.2)
-        audio = tmp_path / "voice.wav"
-        audio.write_bytes(b"synthetic")
-        result = run(tmp_path, "attach-audio", "synthetic", str(audio))
+        result = run(tmp_path, "doctor")  # takes the process lock: free between passes
         assert result.returncode == 0, result.stderr
     finally:
         process.terminate()

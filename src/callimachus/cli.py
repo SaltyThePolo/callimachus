@@ -1,13 +1,11 @@
 import argparse
 import asyncio
-import hashlib
 import json
 import logging
 import os
-import shutil
 import sys
-import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,16 +29,11 @@ def parser():
     login = commands.add_parser("login", help="Authorize an account in your browser")
     login.add_argument("service", choices=["wispr", "drive"])
     commands.add_parser("doctor", help="Check local setup without accessing meeting content")
-    attach = commands.add_parser(
-        "attach-audio", help="Associate your own audio file with a meeting"
-    )
-    attach.add_argument("meeting_id")
-    attach.add_argument("file", type=Path)
-    migrate = commands.add_parser(
+    convert = commands.add_parser(
         "migrate", help="Preview or convert a legacy revision archive to readable folders"
     )
-    migrate.add_argument("--apply", action="store_true", help="Convert (preview is the default)")
-    migrate.add_argument(
+    convert.add_argument("--apply", action="store_true", help="Convert (preview is the default)")
+    convert.add_argument(
         "--cleanup", action="store_true", help="After --apply, remove verified legacy directories"
     )
     for name in ("sync", "watch"):
@@ -71,39 +64,6 @@ def validate_dates(args):
         raise UserError("--since must precede --until")
 
 
-def attach_audio(config, meeting_id, source):
-    if source.suffix.lower() not in {
-        ".wav",
-        ".mp3",
-        ".m4a",
-        ".mp4",
-        ".ogg",
-        ".webm",
-        ".flac",
-        ".aac",
-    }:
-        raise UserError("Unsupported recording extension")
-    if not source.is_file() or source.stat().st_size == 0:
-        raise UserError("Recording must be a nonempty local file")
-    key = hashlib.sha256(meeting_id.encode()).hexdigest()
-    folder = config.state / "audio" / key
-    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-    target = folder / ("recording" + source.suffix.lower())
-    fd, pending = tempfile.mkstemp(dir=folder, prefix=".pending-")
-    try:
-        with os.fdopen(fd, "wb") as output, source.open("rb") as stream:
-            shutil.copyfileobj(stream, output)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(pending, target)
-        for old in folder.glob("recording.*"):
-            if old != target:
-                old.unlink()
-    finally:
-        Path(pending).unlink(missing_ok=True)
-    print("Recording attached. Run sync to publish the next revision.")
-
-
 async def meetings(config, args, skip):
     if args.input:
         try:
@@ -128,13 +88,24 @@ async def meetings(config, args, skip):
             yield meeting
 
 
-def current_archive(config, migrating=False):
+def current_archive(config):
     if config.destination == "drive":
         store = DriveStore(drive_service(config.state), config.state, config.google_folder)
         registry = config.state / "drive-registry.json"
     else:
-        store, registry = LocalStore(config.archive, migrating), config.state / "registry.json"
+        store, registry = LocalStore(config.archive), config.state / "registry.json"
     return CurrentArchive(store, registry, config.timezone, config.restore)
+
+
+@contextmanager
+def archive_lock(config):
+    """Single writer for the local archive directory; Drive mode has no local archive."""
+    if config.destination == "drive":
+        yield
+        return
+    config.archive.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with FileLock(str(config.archive / ".writer.lock"), timeout=0):
+        yield
 
 
 async def sync(config, args):
@@ -166,10 +137,11 @@ def record_status(config, ok, detail):
 def run_sync(config, args):
     """One synchronization pass; the local archive directory is protected by its own lock."""
     try:
-        if config.destination == "drive":
-            return asyncio.run(sync(config, args))
-        config.archive.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with FileLock(str(config.archive / ".writer.lock"), timeout=0):
+        with archive_lock(config):
+            if config.destination == "local" and (config.archive / "meetings").is_dir():
+                raise UserError(
+                    "Legacy revision archive detected; run `callimachus migrate` before syncing here"
+                )
             return asyncio.run(sync(config, args))
     except Exception as exc:
         record_status(config, False, describe_error(exc))
@@ -264,15 +236,13 @@ def main():
                     print(f"Drive archive: https://drive.google.com/drive/folders/{folder}")
                 print("Authorization saved locally.")
                 return 0
-            if args.command == "attach-audio":
-                attach_audio(config, args.meeting_id, args.file)
-                return 0
             if args.command == "migrate":
-                config.archive.mkdir(parents=True, exist_ok=True, mode=0o700)
-                with FileLock(str(config.archive / ".writer.lock"), timeout=0):
-                    archive = current_archive(config, migrating=True)
+                with archive_lock(config):
                     return migrate.run(
-                        config.archive, archive, args.apply, args.apply and args.cleanup
+                        config.archive,
+                        current_archive(config),
+                        args.apply,
+                        args.apply and args.cleanup,
                     )
             return run_sync(config, args)
     except KeyboardInterrupt:

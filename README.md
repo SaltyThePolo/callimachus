@@ -8,7 +8,7 @@ It reads notes, summaries and full paginated transcripts into readable per-meeti
 
 > **Early release.** The archive, CLI, OAuth flows and Drive uploader are implemented and covered by automated tests. Wispr response shapes have been checked through an authenticated connector; this standalone client's OAuth and end-to-end cloud delivery still need validation with your account.
 >
-> **Audio limitation:** the available Wispr MCP catalog does not expose a supported recording download. Callimachus can archive audio you supply with `attach-audio`, but cannot yet retrieve the original recording automatically. Missing recordings are always marked explicitly.
+> **Audio limitation:** the available Wispr MCP catalog does not expose a supported recording download, so the archive is text-only. Recordings attached with earlier versions are kept in private state and never deleted.
 
 ## Quick start
 
@@ -126,19 +126,6 @@ Conversion goes through the normal import policy, so names, collisions and ident
 
 Technical state (meeting identity, folder names, publication and deletion markers) lives in `CALLIMACHUS_STATE_DIR/registry.json` for the local destination and `drive-registry.json` plus `drive-objects.json` for Drive, never inside the archive. **Back it up with the archive**: it holds your deletion intent, and losing it is not a supported silent reset. Archives created by earlier versions in the `meetings/<hash>/revisions` layout are detected and must be migrated explicitly before syncing into the same directory.
 
-## Add a recording
-
-Use the original Wispr meeting ID:
-
-```sh
-uv run callimachus attach-audio '<meeting-id>' '/path/to/recording.m4a'
-uv run callimachus sync
-```
-
-The command copies the file into private local state. The readable layout is text-only: attached audio is kept privately and never deleted, but not published to either destination. Supported extensions: `.wav`, `.mp3`, `.m4a`, `.mp4`, `.ogg`, `.webm`, `.flac`, `.aac`. This is a manual association, not automatic extraction from Wispr.
-
-Wispr documents that uploaded audio is deleted after processing and local audio is retained for approximately 24 hours. Preserve audio through a supported export path if one is available to you. See the [integration research](docs/research/wispr-integration.md).
-
 ## Configuration
 
 All runtime settings are documented in [`.env.example`](.env.example). Environment variables override values in the dotenv file. Relative paths resolve from the working directory; use absolute paths when scheduling the tool.
@@ -147,7 +134,7 @@ All runtime settings are documented in [`.env.example`](.env.example). Environme
 | --- | --- | --- |
 | `CALLIMACHUS_DESTINATION` | `local` | `local` or direct API `drive` |
 | `CALLIMACHUS_ARCHIVE_DIR` | `./archive` | Local archive; unused in Drive mode |
-| `CALLIMACHUS_STATE_DIR` | `./.callimachus` | Credentials, registry, attached audio, locks and Drive IDs |
+| `CALLIMACHUS_STATE_DIR` | `./.callimachus` | Credentials, registries, status, locks and Drive IDs |
 | `CALLIMACHUS_TIMEZONE` | `UTC` | IANA timezone used in folder names |
 | `CALLIMACHUS_RESTORE_DELETED` | `false` | Recreate files and folders you deleted from the archive |
 | `CALLIMACHUS_POLL_INTERVAL` | `300` | Poll interval in seconds, minimum 60 |
@@ -163,7 +150,7 @@ uv run callimachus --env-file /absolute/path/callimachus.env sync
 uv run callimachus doctor
 ```
 
-`doctor` checks local credential-file presence and prints the outcome of the last pass from `CALLIMACHUS_STATE_DIR/status.json` (time, ok or failed, counts or error category); it does not verify remote authorization. The status file never contains meeting text or tokens. `sync` exits 0 after successful delivery (including partial archives by default), 1 on configuration/access/integrity/transfer errors, and 2 for strict completeness failure. Ctrl+C exits 130. `watch` logs operational error categories and retries with increasing delay, up to one hour; credentials requiring fresh consent must be renewed with `login`. Locks are released between polling passes, allowing login and audio attachment while the watcher sleeps. If a pass is active, retry the command after that pass. Strict completeness mode stops the watcher with exit code 2 on incomplete archives.
+`doctor` checks local credential-file presence and prints the outcome of the last pass from `CALLIMACHUS_STATE_DIR/status.json` (time, ok or failed, counts or error category); it does not verify remote authorization. The status file never contains meeting text or tokens. `sync` exits 0 after successful delivery (including partial archives by default), 1 on configuration/access/integrity/transfer errors, and 2 for strict completeness failure. Ctrl+C exits 130. `watch` logs operational error categories and retries with increasing delay, up to one hour; credentials requiring fresh consent must be renewed with `login`. Locks are released between polling passes, allowing login and doctor while the watcher sleeps. If a pass is active, retry the command after that pass. Strict completeness mode stops the watcher with exit code 2 on incomplete archives.
 
 Run only one writer per archive and Drive destination. Local locks prevent concurrent use of the same state/archive directories; they do not coordinate separate machines. Do not delete the state directory during a sync, and keep it private. Custom archive or credential locations should be outside this Git repository.
 

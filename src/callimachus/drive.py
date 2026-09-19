@@ -317,7 +317,8 @@ class DriveStore:
         }
 
     def _folder(self, meeting_id: str, folder: str) -> dict | None:
-        item = self._get(self.ids.get(self._key(meeting_id, "folder")))
+        """The live meeting folder, found by its stable key even if the local id table was lost."""
+        item = self._get(self._id(self._key(meeting_id, "folder")))
         if item is None or item.get("trashed"):
             return None
         if item.get("name") != folder or self.root() not in item.get("parents", []):
@@ -327,18 +328,18 @@ class DriveStore:
             )
         return item
 
-    def exists(self, meeting_id: str, folder: str) -> bool:
-        return self._folder(meeting_id, folder) is not None
-
     def present(self, meeting_id: str, folder: str) -> dict[str, str] | None:
         item = self._folder(meeting_id, folder)
         if item is None:
             return None
-        by_id = {f["id"]: f for f in self._list(f"'{item['id']}' in parents and trashed = false")}
+        by_key = {
+            f.get("appProperties", {}).get("callimachus_key"): f
+            for f in self._list(f"'{item['id']}' in parents and trashed = false")
+        }
         return {
-            name: by_id[self.ids[self._key(meeting_id, name)]]["md5Checksum"]
+            name: by_key[self._key(meeting_id, name)]["md5Checksum"]
             for name in FILES
-            if self.ids.get(self._key(meeting_id, name)) in by_id
+            if self._key(meeting_id, name) in by_key
         }
 
     def rename(self, meeting_id: str, folder: str, new: str) -> None:

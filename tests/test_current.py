@@ -23,3 +23,26 @@ def test_folder_name_bounds_length_and_falls_back_for_empty_title():
     assert (
         folder_name("2026-09-19T10:00:00Z", " ??? ", UTC) == "2026-09-19 10-00 - Untitled meeting"
     )
+
+
+def test_interrupted_rename_is_finished_on_the_next_pass_not_treated_as_deletion(tmp_path):
+    from callimachus.current import CurrentArchive, LocalStore
+    from callimachus.models import Meeting
+
+    class Crashy(LocalStore):
+        def rename(self, meeting_id, folder, new):
+            raise OSError("crash before the store moved the folder")
+
+    meeting = Meeting("m", "First", "2026-09-19T10:00:00Z", "n", "s", "t")
+    registry = tmp_path / "registry.json"
+    CurrentArchive(LocalStore(tmp_path / "a"), registry, UTC, False).publish(meeting)
+    renamed = Meeting("m", "Second", "2026-09-19T10:00:00Z", "n", "s", "t")
+    try:
+        CurrentArchive(Crashy(tmp_path / "a"), registry, UTC, False).publish(renamed)
+    except OSError:
+        pass
+    outcome = CurrentArchive(LocalStore(tmp_path / "a"), registry, UTC, False).publish(renamed)
+    assert outcome == "imported"
+    assert sorted(p.name for p in (tmp_path / "a").iterdir() if p.is_dir()) == [
+        "2026-09-19 10-00 - Second"
+    ]
