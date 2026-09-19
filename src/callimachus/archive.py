@@ -24,6 +24,8 @@ from .errors import UserError
 from .fs import atomic_write, canonical, checksum
 from .models import Meeting
 
+AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".mp4", ".ogg", ".webm", ".flac", ".aac"}
+
 
 def validate_revision(path: Path) -> dict:
     entries = list(path.iterdir())
@@ -49,6 +51,52 @@ class SavedArchive:
     key: str
 
 
+def _stage(meeting: Meeting, audio: Path | None, into: Path) -> list[str]:
+    (into / "notes.md").write_text(meeting.notes, encoding="utf-8")
+    (into / "summary.md").write_text(meeting.summary, encoding="utf-8")
+    missing = [] if meeting.summary.strip() else ["summary"]
+    if meeting.transcript is not None and meeting.transcript.strip():
+        (into / "transcript.txt").write_text(meeting.transcript, encoding="utf-8")
+    else:
+        missing.append("transcript")
+    if audio is None:
+        missing.append("recording")
+    elif audio.suffix.lower() not in AUDIO_EXTENSIONS:
+        raise UserError("Unsupported recording extension")
+    else:
+        shutil.copyfile(audio, into / f"recording{audio.suffix.lower()}")
+    return missing
+
+
+def _metadata(meeting: Meeting, staged: Path, missing: list[str]) -> dict:
+    return meeting.metadata() | {
+        "schema_version": 1,
+        "source": "wispr-flow",
+        "complete": not missing,
+        "missing": missing,
+        "sha256": {p.name: checksum(p) for p in sorted(staged.iterdir())},
+    }
+
+
+def _commit(staged: Path, destination: Path) -> None:
+    if destination.exists():
+        # Same name means same metadata, hence same digests: validating is enough.
+        validate_revision(destination)
+        return
+    for p in staged.iterdir():
+        p.chmod(0o600)
+        with p.open("rb") as stream:
+            os.fsync(stream.fileno())
+    # Rename the whole revision before pointing readers at it.
+    os.rename(staged, destination)
+
+
+def _publish(manifest: Path, payload: dict) -> None:
+    data = canonical(payload)
+    if not manifest.exists() or manifest.read_bytes() != data:
+        atomic_write(manifest, data)
+
+
 class Archive:
     def __init__(self, root: Path):
         self.root = root.resolve()
@@ -59,53 +107,19 @@ class Archive:
         revisions.mkdir(parents=True, exist_ok=True, mode=0o700)
         with tempfile.TemporaryDirectory(prefix=".pending-", dir=revisions) as temporary:
             staged = Path(temporary)
-            (staged / "notes.md").write_text(meeting.notes, encoding="utf-8")
-            (staged / "summary.md").write_text(meeting.summary, encoding="utf-8")
-            missing = [] if meeting.summary.strip() else ["summary"]
-            if meeting.transcript is not None and meeting.transcript.strip():
-                (staged / "transcript.txt").write_text(meeting.transcript, encoding="utf-8")
-            else:
-                missing.append("transcript")
-            if audio is None:
-                missing.append("recording")
-            else:
-                suffix = audio.suffix.lower()
-                if suffix not in {".wav", ".mp3", ".m4a", ".mp4", ".ogg", ".webm", ".flac", ".aac"}:
-                    raise UserError("Unsupported recording extension")
-                shutil.copyfile(audio, staged / f"recording{suffix}")
-            files = {p.name: checksum(p) for p in sorted(staged.iterdir())}
-            metadata = meeting.metadata() | {
-                "schema_version": 1,
-                "source": "wispr-flow",
-                "complete": not missing,
-                "missing": missing,
-                "sha256": files,
-            }
+            missing = _stage(meeting, audio, staged)
+            metadata = _metadata(meeting, staged, missing)
             (staged / "metadata.json").write_bytes(canonical(metadata))
-            revision = hashlib.sha256(canonical(metadata)).hexdigest()
-            destination = revisions / revision
-            if destination.exists():
-                validate_revision(destination)
-                for p in staged.iterdir():
-                    existing = destination / p.name
-                    if not existing.is_file() or checksum(existing) != checksum(p):
-                        raise UserError("Archive integrity check failed; restore damaged revision")
-            else:
-                for p in staged.iterdir():
-                    p.chmod(0o600)
-                    with p.open("rb") as stream:
-                        os.fsync(stream.fileno())
-                # Rename the whole revision before pointing readers at it.
-                os.rename(staged, destination)
-            manifest = parent / "latest.json"
-            payload = canonical(
-                {
-                    "schema_version": 1,
-                    "meeting_id": meeting.id,
-                    "revision": revision,
-                    "complete": not missing,
-                }
-            )
-            if not manifest.exists() or manifest.read_bytes() != payload:
-                atomic_write(manifest, payload)
-            return SavedArchive(destination, manifest, not missing, meeting.key)
+            destination = revisions / hashlib.sha256(canonical(metadata)).hexdigest()
+            _commit(staged, destination)
+        manifest = parent / "latest.json"
+        _publish(
+            manifest,
+            {
+                "schema_version": 1,
+                "meeting_id": meeting.id,
+                "revision": destination.name,
+                "complete": not missing,
+            },
+        )
+        return SavedArchive(destination, manifest, not missing, meeting.key)

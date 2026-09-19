@@ -114,3 +114,15 @@ def test_extra_file_breaks_immutable_revision_integrity(tmp_path):
     (saved.path / "unexpected.txt").write_text("not part of archive")
     with pytest.raises(ValueError, match="integrity"):
         archive.save(sample())
+
+
+def test_identical_save_hashes_each_existing_file_once(tmp_path, monkeypatch):
+    import callimachus.archive as module
+
+    archive = Archive(tmp_path)
+    first = archive.save(sample())
+    hashed, real = [], module.checksum
+    monkeypatch.setattr(module, "checksum", lambda p: (hashed.append(p), real(p))[1])
+    archive.save(sample())
+    existing = [p for p in hashed if p.is_relative_to(first.path)]
+    assert len(existing) == len(set(existing)) == 3
