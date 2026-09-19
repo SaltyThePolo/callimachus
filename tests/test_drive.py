@@ -120,7 +120,14 @@ class FakeDrive:
 
 def saved(tmp_path):
     return Archive(tmp_path / "archive").save(
-        Meeting("meeting", "Demo", "2026-09-19T10:00:00Z", "notes", "summary", "words")
+        Meeting(
+            id="meeting",
+            title="Demo",
+            start="2026-09-19T10:00:00Z",
+            notes="notes",
+            summary="summary",
+            transcript="words",
+        )
     )
 
 
@@ -159,12 +166,17 @@ def test_lost_create_response_does_not_duplicate_root(tmp_path):
 
 
 def test_staged_history_is_delivered_before_current_pointer(tmp_path):
-    from dataclasses import replace
-
     archive = Archive(tmp_path / "archive")
-    original = Meeting("meeting", "Demo", "2026-09-19T10:00:00Z", "old", "summary", "words")
+    original = Meeting(
+        id="meeting",
+        title="Demo",
+        start="2026-09-19T10:00:00Z",
+        notes="old",
+        summary="summary",
+        transcript="words",
+    )
     first = archive.save(original)
-    second = archive.save(replace(original, notes="new"))
+    second = archive.save(original.model_copy(update=dict(notes="new")))
     service = FakeDrive()
     destination = DriveDestination(service, tmp_path / "state")
     destination.drain(archive)

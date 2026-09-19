@@ -10,49 +10,32 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
 # General Public License for more details.
 
-from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from hashlib import sha256
 
-from .errors import UserError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 def meeting_key(meeting_id: str) -> str:
     return sha256(meeting_id.encode()).hexdigest()
 
 
-@dataclass(frozen=True)
-class Meeting:
-    id: str
+class Meeting(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str = Field(min_length=1)
     title: str
-    start: str
+    start: AwareDatetime
     notes: str
     summary: str
     transcript: str | None
-    end: str | None = None
-    modified_at: str | None = None
+    end: AwareDatetime | None = None
+    modified_at: str | None = None  # opaque Wispr version token, compared for equality only
     share_link: str | None = None
-    attendees: list = field(default_factory=list)
-
-    def __post_init__(self):
-        for name in ("id", "title", "start", "notes", "summary"):
-            if not isinstance(getattr(self, name), str):
-                raise UserError(f"Meeting {name} must be a string")
-        if not self.id:
-            raise UserError("Meeting id cannot be empty")
-        if self.transcript is not None and not isinstance(self.transcript, str):
-            raise UserError("Meeting transcript must be text or null")
-        try:
-            if datetime.fromisoformat(self.start).tzinfo is None:
-                raise ValueError()
-        except ValueError:
-            raise UserError("Meeting start must be an ISO datetime with timezone") from None
+    attendees: list[str] = []
 
     @property
     def key(self) -> str:
         return meeting_key(self.id)
 
     def metadata(self) -> dict:
-        return {
-            k: v for k, v in asdict(self).items() if k not in {"notes", "summary", "transcript"}
-        }
+        return self.model_dump(mode="json", exclude={"notes", "summary", "transcript"})

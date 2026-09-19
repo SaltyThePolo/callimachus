@@ -48,6 +48,13 @@ def fixture(tmp_path, *meetings, **changes):
     return str(path)
 
 
+def test_unknown_input_field_is_a_user_error(tmp_path):
+    result = run(tmp_path, "sync", "--input", fixture(tmp_path, bogus_field=1))
+    assert result.returncode == 1
+    assert "Error: bogus_field: Extra inputs are not permitted" in result.stderr
+    assert "TypeError" not in result.stderr
+
+
 def folders(tmp_path):
     return sorted(p.name for p in (tmp_path / "archive").iterdir() if p.is_dir())
 

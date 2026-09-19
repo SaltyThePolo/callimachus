@@ -23,7 +23,14 @@ from callimachus.drive import FOLDER, DriveStore
 from callimachus.models import Meeting
 
 UTC = ZoneInfo("UTC")
-MEETING = Meeting("meeting", "Demo", "2026-09-19T10:00:00Z", "notes", "summary", "words")
+MEETING = Meeting(
+    id="meeting",
+    title="Demo",
+    start="2026-09-19T10:00:00Z",
+    notes="notes",
+    summary="summary",
+    transcript="words",
+)
 
 
 def archive(service, tmp_path, restore=False):
@@ -77,7 +84,12 @@ def test_source_edits_update_contents_and_rename_folder_keeping_ids(tmp_path):
     )
     before = ids(service, folder_id)
     edited = Meeting(
-        "meeting", "Demo: renamed", "2026-09-19T10:00:00Z", "new notes", "summary", "words"
+        id="meeting",
+        title="Demo: renamed",
+        start="2026-09-19T10:00:00Z",
+        notes="new notes",
+        summary="summary",
+        transcript="words",
     )
     archive(service, tmp_path).publish(edited)
     assert list(tree(service)) == ["2026-09-19 10-00 - Demo renamed"]
@@ -129,7 +141,14 @@ def test_trashed_file_stays_deleted_unless_restore_is_enabled(tmp_path):
         i["id"] for i in service.items.values() if i["name"] == "2026-09-19 10-00 - Demo"
     )
     service.items[ids(service, folder_id)["transcript.md"]]["trashed"] = True
-    edited = Meeting("meeting", "Demo", "2026-09-19T10:00:00Z", "notes", "summary", "more words")
+    edited = Meeting(
+        id="meeting",
+        title="Demo",
+        start="2026-09-19T10:00:00Z",
+        notes="notes",
+        summary="summary",
+        transcript="more words",
+    )
     assert archive(service, tmp_path).publish(edited) == "imported"
     assert sorted(tree(service)["2026-09-19 10-00 - Demo"]) == ["notes.md", "summary.md"]
     service.items[folder_id]["trashed"] = True

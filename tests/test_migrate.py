@@ -18,12 +18,12 @@ from callimachus.archive import Archive
 from callimachus.models import Meeting
 
 LEGACY = Meeting(
-    "legacy-one",
-    "Quarterly review",
-    "2026-06-01T09:00:00Z",
-    "notes",
-    "summary",
-    "words",
+    id="legacy-one",
+    title="Quarterly review",
+    start="2026-06-01T09:00:00Z",
+    notes="notes",
+    summary="summary",
+    transcript="words",
     modified_at="v1",
 )
 
@@ -57,10 +57,8 @@ def readable(tmp_path):
 
 
 def test_apply_converts_current_revision_is_rerunnable_and_keeps_legacy_until_cleanup(tmp_path):
-    from dataclasses import replace
-
     root = legacy_archive(
-        tmp_path, LEGACY, replace(LEGACY, notes="second revision", modified_at="v2")
+        tmp_path, LEGACY, LEGACY.model_copy(update=dict(notes="second revision", modified_at="v2"))
     )
     result = run(tmp_path, "migrate", "--apply")
     assert result.returncode == 0, result.stderr
@@ -78,8 +76,22 @@ def test_apply_converts_current_revision_is_rerunnable_and_keeps_legacy_until_cl
 
 
 def test_cleanup_removes_only_verified_directories_and_parks_the_rest(tmp_path):
-    partial = Meeting("legacy-two", "No transcript yet", "2026-06-02T09:00:00Z", "n", "s", None)
-    with_audio = Meeting("legacy-three", "Recorded", "2026-06-03T09:00:00Z", "n", "s", "t")
+    partial = Meeting(
+        id="legacy-two",
+        title="No transcript yet",
+        start="2026-06-02T09:00:00Z",
+        notes="n",
+        summary="s",
+        transcript=None,
+    )
+    with_audio = Meeting(
+        id="legacy-three",
+        title="Recorded",
+        start="2026-06-03T09:00:00Z",
+        notes="n",
+        summary="s",
+        transcript="t",
+    )
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"synthetic")
     root = legacy_archive(tmp_path, LEGACY, partial)
@@ -102,7 +114,14 @@ def test_cleanup_removes_only_verified_directories_and_parks_the_rest(tmp_path):
 
 
 def test_corrupt_legacy_entry_blocks_its_cleanup_and_the_rest_proceeds(tmp_path):
-    other = Meeting("legacy-two", "Fine", "2026-06-02T09:00:00Z", "n", "s", "t")
+    other = Meeting(
+        id="legacy-two",
+        title="Fine",
+        start="2026-06-02T09:00:00Z",
+        notes="n",
+        summary="s",
+        transcript="t",
+    )
     root = legacy_archive(tmp_path, LEGACY, other)
     victim = next(root.glob("meetings/*/revisions/*/notes.md"))
     victim.write_text("tampered")

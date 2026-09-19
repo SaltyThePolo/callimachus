@@ -11,7 +11,6 @@
 # General Public License for more details.
 
 import json
-from dataclasses import replace
 
 from callimachus.archive import Archive
 from callimachus.models import Meeting
@@ -48,7 +47,7 @@ def test_partial_is_explicit_and_identical_sync_does_not_rewrite(tmp_path):
 def test_changed_notes_preserve_old_revision_and_publish_new_pointer(tmp_path):
     archive = Archive(tmp_path)
     first = archive.save(sample())
-    second = archive.save(replace(sample(), notes="Revised"))
+    second = archive.save(sample().model_copy(update=dict(notes="Revised")))
     assert first.path != second.path
     assert (first.path / "notes.md").read_text() == "Notes"
     assert json.loads(second.manifest.read_text())["revision"] == second.path.name
@@ -100,9 +99,9 @@ def test_empty_transcript_is_not_reported_complete(tmp_path):
 def test_meeting_rejects_naive_time_and_invalid_text():
     import pytest
 
-    with pytest.raises(ValueError, match="timezone"):
+    with pytest.raises(ValueError, match=r"start\n.*timezone"):
         sample(start="2026-09-19T10:00:00")
-    with pytest.raises(ValueError, match="notes"):
+    with pytest.raises(ValueError, match=r"notes\n.*string"):
         sample(notes={"bad": "type"})
 
 

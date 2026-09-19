@@ -24,6 +24,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from filelock import FileLock, Timeout
+from pydantic import ValidationError
 
 from . import migrate
 from .auth import connect_wispr, drive_service
@@ -105,7 +106,11 @@ async def meetings(config, args, skip):
         for item in data:
             if not isinstance(item, dict):
                 raise UserError("Each input meeting must be an object")
-            meeting = Meeting(**item)
+            try:
+                meeting = Meeting.model_validate(item)
+            except ValidationError as exc:
+                first = exc.errors()[0]
+                raise UserError(f"{'.'.join(map(str, first['loc']))}: {first['msg']}") from None
             if not skip(meeting.id, meeting.modified_at):
                 yield meeting
         return

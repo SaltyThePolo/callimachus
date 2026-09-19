@@ -41,8 +41,8 @@ def ready(meeting: Meeting) -> bool:
     return bool(meeting.summary.strip() and meeting.transcript and meeting.transcript.strip())
 
 
-def folder_name(start: str, title: str, tz: ZoneInfo) -> str:
-    stamp = datetime.fromisoformat(start).astimezone(tz).strftime("%Y-%m-%d %H-%M")
+def folder_name(start: datetime, title: str, tz: ZoneInfo) -> str:
+    stamp = start.astimezone(tz).strftime("%Y-%m-%d %H-%M")
     clean = " ".join(_UNSAFE.sub(" ", title).split())[:80].rstrip(" .")
     return f"{stamp} - {clean or 'Untitled meeting'}"
 
@@ -101,7 +101,7 @@ class CurrentArchive:
         if "previous" in record:
             self.store.rename(meeting_id, record.pop("previous"), record["folder"])
             self._save()
-        base = folder_name(record["start"], record["title"], self.tz)
+        base = folder_name(datetime.fromisoformat(record["start"]), record["title"], self.tz)
         old = record.get("folder")
         if old and record.get("base") == base:
             return old
@@ -146,7 +146,7 @@ class CurrentArchive:
     def publish(self, meeting: Meeting) -> str:
         """Return imported, pending (source text incomplete) or suppressed (user deleted folder)."""
         record = self.meetings.setdefault(meeting.id, {"published": False, "deleted": []})
-        record.update(start=meeting.start, title=meeting.title, modified_at=meeting.modified_at)
+        record.update(meeting.model_dump(mode="json", include={"start", "title", "modified_at"}))
         if not ready(meeting):
             if "folder" in record:  # keep an existing folder named correctly, reserve no new name
                 self._place(meeting.id, record)
