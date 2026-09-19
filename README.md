@@ -35,6 +35,8 @@ Wispr login opens your browser, listens on `127.0.0.1:8765` for up to five minut
 
 ## Google Drive API setup
 
+For step-by-step console instructions, see [Get the Google Drive desktop OAuth JSON](docs/google-drive-oauth-setup.md).
+
 1. Create a Google Cloud project and enable the **Google Drive API**.
 2. Configure its OAuth consent screen and add yourself as a test user if the app is in testing mode.
 3. Create an OAuth client with application type **Desktop app**. Download its JSON into `credentials/google-client.json` (ignored by Git).

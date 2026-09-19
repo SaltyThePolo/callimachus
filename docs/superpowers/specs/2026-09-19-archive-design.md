@@ -1,5 +1,7 @@
 # Callimachus initial implementation
 
+> Historical implementation design. The later [current-only archive planning draft](2026-09-19-current-archive-draft.md) captures the user's revised requirements. The implementation authorization and archive defaults below do not authorize further development under the resumed planning phase.
+
 The user has authorized implementation now and selected the Google Drive API.
 
 Python 3.11+ CLI: `login wispr`, `login drive`, `sync`, `watch`, `attach-audio`, and `doctor`. Wispr uses the official MCP SDK with browser OAuth, stored credentials and refresh support. Read `search_meetings` and `get_meeting`, page all results and text ranges, and only archive finalized meetings. Do not send any meeting text to another LLM.
