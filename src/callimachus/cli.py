@@ -16,6 +16,7 @@ from filelock import FileLock
 from .archive import Archive
 from .auth import connect_wispr, drive_service
 from .config import Config
+from .current import CurrentArchive
 from .drive import DriveDestination
 from .errors import UserError
 from .models import Meeting
@@ -95,29 +96,7 @@ def attach_audio(config, meeting_id, source):
     print("Recording attached. Run sync to publish the next revision.")
 
 
-async def sync(config, args):
-    store = Archive(config.archive)
-    drive = (
-        DriveDestination(drive_service(config.state), config.state, config.google_folder)
-        if config.destination == "drive"
-        else None
-    )
-    if drive:
-        # Deliver historical revisions even if their source was changed or deleted.
-        drive.drain(store)
-    total, partial = 0, 0
-
-    def save(meeting):
-        nonlocal total, partial
-        attachments = list((config.state / "audio" / meeting.key).glob("recording.*"))
-        if len(attachments) > 1:
-            raise UserError("Multiple recording attachments found; attach the intended file again")
-        result = store.save(meeting, attachments[0] if attachments else None)
-        if drive:
-            drive.upload(result)
-        total += 1
-        partial += not result.complete
-
+async def meetings(config, args):
     if args.input:
         data = json.loads(args.input.read_text(encoding="utf-8"))
         if not isinstance(data, list):
@@ -125,16 +104,45 @@ async def sync(config, args):
         for item in data:
             if not isinstance(item, dict):
                 raise UserError("Each input meeting must be an object")
-            save(Meeting(**item))
-    else:
-        async with connect_wispr(config.state) as session:
+            yield Meeting(**item)
+        return
+    async with connect_wispr(config.state) as session:
 
-            async def call(name, arguments):
-                return decode_result(await session.call_tool(name, arguments))
+        async def call(name, arguments):
+            return decode_result(await session.call_tool(name, arguments))
 
-            async for meeting in WisprSource(call).meetings(args.since, args.until):
-                save(meeting)
-    print(f"archived={total} partial={partial} destination={config.destination}", flush=True)
+        async for meeting in WisprSource(call).meetings(args.since, args.until):
+            yield meeting
+
+
+async def sync(config, args):
+    if config.destination == "drive":
+        return await sync_drive(config, args)
+    archive = CurrentArchive(config.archive, config.state, config.timezone, config.restore)
+    archive.reconcile()
+    counts = {"imported": 0, "pending": 0, "suppressed": 0}
+    async for meeting in meetings(config, args):
+        counts[archive.publish(meeting)] += 1
+    print(" ".join(f"{k}={v}" for k, v in counts.items()) + " destination=local", flush=True)
+    return 2 if counts["pending"] and config.require_complete else 0
+
+
+async def sync_drive(config, args):
+    # ponytail: legacy revision layout with local staging until the Drive ticket lands.
+    store = Archive(config.archive)
+    drive = DriveDestination(drive_service(config.state), config.state, config.google_folder)
+    # Deliver historical revisions even if their source was changed or deleted.
+    drive.drain(store)
+    total, partial = 0, 0
+    async for meeting in meetings(config, args):
+        attachments = list((config.state / "audio" / meeting.key).glob("recording.*"))
+        if len(attachments) > 1:
+            raise UserError("Multiple recording attachments found; attach the intended file again")
+        result = store.save(meeting, attachments[0] if attachments else None)
+        drive.upload(result)
+        total += 1
+        partial += not result.complete
+    print(f"archived={total} partial={partial} destination=drive", flush=True)
     return 2 if partial and config.require_complete else 0
 
 

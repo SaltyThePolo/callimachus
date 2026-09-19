@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -16,6 +17,8 @@ class Config:
     require_complete: bool
     google_client: Path | None
     google_folder: str | None
+    timezone: ZoneInfo
+    restore: bool
 
     @classmethod
     def load(cls, env_file: Path):
@@ -29,16 +32,27 @@ class Config:
             raise UserError("CALLIMACHUS_POLL_INTERVAL must be an integer") from None
         if interval < 60:
             raise UserError("CALLIMACHUS_POLL_INTERVAL must be at least 60 seconds")
-        required = os.getenv("CALLIMACHUS_REQUIRE_COMPLETE", "false").lower()
-        if required not in {"true", "false"}:
-            raise UserError("CALLIMACHUS_REQUIRE_COMPLETE must be true or false")
+        timezone = os.getenv("CALLIMACHUS_TIMEZONE", "UTC")
+        try:
+            zone = ZoneInfo(timezone)
+        except (KeyError, ValueError, OSError):
+            raise UserError("CALLIMACHUS_TIMEZONE must be an IANA timezone name") from None
         client = os.getenv("CALLIMACHUS_GOOGLE_CLIENT_SECRET_FILE", "")
         return cls(
             archive=Path(os.getenv("CALLIMACHUS_ARCHIVE_DIR", "./archive")).expanduser().resolve(),
             state=Path(os.getenv("CALLIMACHUS_STATE_DIR", "./.callimachus")).expanduser().resolve(),
             destination=destination,
             interval=interval,
-            require_complete=required == "true",
+            require_complete=_flag("CALLIMACHUS_REQUIRE_COMPLETE"),
             google_client=Path(client).expanduser().resolve() if client else None,
             google_folder=os.getenv("CALLIMACHUS_GOOGLE_DRIVE_FOLDER_ID") or None,
+            timezone=zone,
+            restore=_flag("CALLIMACHUS_RESTORE_DELETED"),
         )
+
+
+def _flag(name: str) -> bool:
+    value = os.getenv(name, "false").lower()
+    if value not in {"true", "false"}:
+        raise UserError(f"{name} must be true or false")
+    return value == "true"
