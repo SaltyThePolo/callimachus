@@ -53,3 +53,14 @@ Absence from this review does not prove a capability does not exist. Search snip
 With an authorized account, inspect the MCP tool catalog and one completed meeting. Validate full transcript pagination, notes/summary separation, stable IDs, updates, readiness, authentication renewal and throttling. Request a supported audio-export route from Wispr if the catalog lacks one. Until that is verified, choose explicitly whether audio is mandatory for the first release or whether a clearly labelled text-only first version is acceptable. Do not silently redefine the user's requested archive.
 
 Polling with retry/backoff and per-artifact states is a candidate design, not a verified Wispr feature. A separately supplied audio file is another possible input, not automatic recovery of Wispr's recording. No account data, tokens or recordings were accessed in this research.
+
+
+## Authenticated connector observation during implementation
+
+On 2026-09-19 the connected Wispr tools were inspected and a bounded read was performed. No personal meeting data was copied into the repository. The catalog exposes `search_meetings` and `get_meeting`, but no recording-download tool.
+
+Observed search fields: `meetings`, `count`, `has_more`; meeting entries include `id`, `title`, `finalized`, `has_transcript`, `start`, `end`, `modified_at`, and `share_link`. The tool schema documents `next_cursor` continuation and a 1,000-result search cap.
+
+Observed detail fields: `id`, `title`, `content`, `summary`, `finalized`, `has_transcript`, `attendees`, `todos`, `start`, `end`, `modified_at`, `share_link`, and `transcript`. Requests support `view_content` and `view_transcript`, each with `start_char` and `char_limit` (maximum 40,000). A bounded transcript response carried an explicit continuation marker and a participant-label safety envelope. Tests use synthetic text with this observed shape.
+
+This resolves the request/response naming uncertainty for the available connector. It does not validate this standalone application's browser authorization, unattended renewal, or Drive delivery. No audio endpoint was discovered; automatic original-audio retrieval remains unsupported.

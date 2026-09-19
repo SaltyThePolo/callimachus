@@ -1,0 +1,11 @@
+[
+  {
+    "id": "synthetic-demo-meeting",
+    "title": "Callimachus demo — synthetic data",
+    "start": "2026-09-19T10:00:00Z",
+    "end": "2026-09-19T10:15:00Z",
+    "notes": "Try the archiver with synthetic data.",
+    "summary": "The team agreed to test the archive and review its metadata.",
+    "transcript": "Speaker A: Shall we test the archive?\nSpeaker B: Yes, with synthetic data."
+  }
+]
