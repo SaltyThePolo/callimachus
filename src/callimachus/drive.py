@@ -20,9 +20,11 @@ from pathlib import Path
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaInMemoryUpload
 
-from .archive import Archive, SavedArchive, atomic_write, canonical, checksum, validate_revision
+from .archive import Archive, SavedArchive, validate_revision
 from .current import FILES
 from .errors import UserError
+from .fs import atomic_write, canonical, checksum
+from .models import meeting_key
 
 FOLDER = "application/vnd.google-apps.folder"
 FIELDS = "id,name,mimeType,parents,appProperties,md5Checksum,trashed"
@@ -143,7 +145,7 @@ class DriveDestination:
 
     def upload(self, saved: SavedArchive, publish=True) -> str:
         metadata = validate_revision(saved.path)
-        if hashlib.sha256(metadata["id"].encode()).hexdigest() != saved.key:
+        if meeting_key(metadata["id"]) != saved.key:
             raise UserError("Archive meeting identity integrity mismatch")
         if publish:
             latest = json.loads(saved.manifest.read_text())

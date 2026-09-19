@@ -17,6 +17,10 @@ from hashlib import sha256
 from .errors import UserError
 
 
+def meeting_key(meeting_id: str) -> str:
+    return sha256(meeting_id.encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class Meeting:
     id: str
@@ -46,7 +50,7 @@ class Meeting:
 
     @property
     def key(self) -> str:
-        return sha256(self.id.encode()).hexdigest()
+        return meeting_key(self.id)
 
     def metadata(self) -> dict:
         return {

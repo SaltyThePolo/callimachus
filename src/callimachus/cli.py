@@ -25,12 +25,12 @@ from pathlib import Path
 from filelock import FileLock, Timeout
 
 from . import migrate
-from .archive import atomic_write, canonical
 from .auth import connect_wispr, drive_service
 from .config import Config
 from .current import CurrentArchive, LocalStore
 from .drive import DriveStore
 from .errors import UserError
+from .fs import atomic_write, canonical
 from .models import Meeting
 from .wispr import WisprSource, decode_result
 

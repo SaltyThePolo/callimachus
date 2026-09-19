@@ -27,8 +27,8 @@ from mcp.client.auth import OAuthClientProvider
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
-from .archive import atomic_write
 from .errors import UserError
+from .fs import atomic_write
 
 WISPR_URL = "https://api.wisprflow.ai/connect/mcp"
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]

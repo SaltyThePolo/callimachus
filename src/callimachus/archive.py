@@ -21,16 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import UserError
+from .fs import atomic_write, canonical, checksum
 from .models import Meeting
-
-
-def canonical(value: object) -> bytes:
-    return (json.dumps(value, sort_keys=True, ensure_ascii=False, indent=2) + "\n").encode()
-
-
-def checksum(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def validate_revision(path: Path) -> dict:
@@ -47,19 +39,6 @@ def validate_revision(path: Path) -> dict:
         if Path(filename).name != filename or checksum(path / filename) != digest:
             raise UserError("Archive file integrity check failed")
     return metadata
-
-
-def atomic_write(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd, name = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(name, path)
-    finally:
-        Path(name).unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)

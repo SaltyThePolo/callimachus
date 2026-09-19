@@ -23,8 +23,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .archive import atomic_write, canonical
 from .errors import UserError
+from .fs import atomic_write, canonical
 from .models import Meeting
 
 FILES = {"notes.md": "notes", "summary.md": "summary", "transcript.md": "transcript"}
