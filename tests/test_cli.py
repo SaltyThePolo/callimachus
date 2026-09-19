@@ -301,3 +301,44 @@ def test_pending_meeting_reserves_no_folder_name(tmp_path):
         "2026-09-19 10-00 - Synthetic meeting",
         "2026-09-19 10-00 - Synthetic meeting (2)",
     ]
+
+
+def test_unchanged_snapshots_are_skipped_and_edits_are_revisited(tmp_path):
+    source = fixture(tmp_path, modified_at="v1")
+    run(tmp_path, "sync", "--input", source)
+    notes = tmp_path / "archive" / "2026-09-19 10-00 - Synthetic meeting" / "notes.md"
+    stamp = notes.stat().st_mtime_ns
+    again = run(tmp_path, "sync", "--input", source)
+    assert "unchanged=1" in again.stdout and notes.stat().st_mtime_ns == stamp
+    edited = run(
+        tmp_path,
+        "sync",
+        "--input",
+        fixture(tmp_path, modified_at="v2", notes="old meeting, new notes"),
+    )
+    assert "imported=1" in edited.stdout and notes.read_text() == "old meeting, new notes"
+
+
+def test_failed_pass_then_success_is_visible_in_local_status(tmp_path):
+    broken = tmp_path / "broken.json"
+    broken.write_text("not json: secret words")
+    failed = run(tmp_path, "sync", "--input", str(broken))
+    status = json.loads((tmp_path / "state" / "status.json").read_text())
+    assert failed.returncode == 1 and status["ok"] is False
+    assert "secret words" not in json.dumps(status) and "secret words" not in failed.stderr
+    doctor = run(tmp_path, "doctor")
+    assert "last_pass=failed" in doctor.stdout
+    good = run(tmp_path, "sync", "--input", fixture(tmp_path))
+    status = json.loads((tmp_path / "state" / "status.json").read_text())
+    assert (
+        good.returncode == 0 and status["ok"] is True and status["summary"].startswith("imported=1")
+    )
+
+
+def test_second_writer_is_rejected_with_an_actionable_message(tmp_path):
+    from filelock import FileLock
+
+    (tmp_path / "state").mkdir()
+    with FileLock(str(tmp_path / "state" / "process.lock")):
+        result = run(tmp_path, "sync", "--input", fixture(tmp_path))
+    assert result.returncode == 1 and "Callimachus process" in result.stderr

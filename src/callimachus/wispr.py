@@ -3,6 +3,7 @@
 import json
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import datetime
 
 from .errors import UserError
 from .models import Meeting
@@ -53,38 +54,84 @@ def parse_range(text: str, field: str) -> tuple[str, int | None]:
     return text, None
 
 
+def partition(low: str | None, high: str | None, starts: list[str]) -> list[tuple]:
+    """Split a capped [low, high) window at a pivot; open bounds stay open."""
+    parsed = [datetime.fromisoformat(s) for s in starts]
+    if low is not None and high is not None:
+        pivot = (
+            datetime.fromisoformat(low)
+            + (datetime.fromisoformat(high) - datetime.fromisoformat(low)) / 2
+        )
+    elif not parsed:
+        raise UserError(
+            "Wispr search cap reached and results carry no start times; cannot partition"
+        )
+    else:
+        pivot = min(parsed) if low is None else max(parsed)
+    bounded = (low is None or pivot > datetime.fromisoformat(low)) and (
+        high is None or pivot < datetime.fromisoformat(high)
+    )
+    if not bounded:
+        raise UserError(
+            f"Wispr search cap reached for meetings starting around {pivot.isoformat()}; the window "
+            "cannot be partitioned further, so discovery is incomplete"
+        )
+    text = pivot.isoformat()
+    return [(low, text), (text, high)]
+
+
 class WisprSource:
     def __init__(self, call: Call):
         self.call = call
 
     async def meetings(
-        self, since: str | None = None, until: str | None = None
+        self,
+        since: str | None = None,
+        until: str | None = None,
+        skip: Callable[[str, str | None], bool] | None = None,
     ) -> AsyncIterator[Meeting]:
+        """Every finalized meeting starting in [since, until), all history when both are None.
+
+        A capped search window is split by start time until each part fits; stable IDs keep
+        overlapping parts from yielding twice. skip(id, modified_at) avoids fetching meetings
+        whose snapshot the caller already holds.
+        """
+        seen: set[str] = set()
+        windows = [(since, until)]
+        while windows:
+            low, high = windows.pop()
+            starts: list[str] = []
+            async for page in self._search(low, high):
+                for item in page["meetings"]:
+                    meeting_id = item.get("id")
+                    if not isinstance(meeting_id, str) or not meeting_id:
+                        raise UserError("Missing stable Wispr meeting ID")
+                    if isinstance(item.get("start"), str):
+                        starts.append(item["start"])
+                    if item.get("finalized") is not True or meeting_id in seen:
+                        continue
+                    seen.add(meeting_id)
+                    if skip and skip(meeting_id, item.get("modified_at")):
+                        continue
+                    yield await self.get(meeting_id)
+                if page.get("truncated"):
+                    windows += partition(low, high, starts)
+                    break
+
+    async def _search(self, since: str | None, until: str | None) -> AsyncIterator[dict]:
         args: dict = {"limit": 200}
         if since:
             args["since"] = since
         if until:
             args["until"] = until
-        cursors, seen = set(), set()
+        cursors: set[str] = set()
         while True:
             page = await self.call("search_meetings", args)
             if not isinstance(page.get("meetings"), list):
                 raise UserError("Missing Wispr meetings list")
-            if page.get("truncated"):
-                raise UserError(
-                    "Wispr search cap reached; use a narrower --since/--until date window"
-                )
-            for item in page["meetings"]:
-                if item.get("finalized") is not True:
-                    continue
-                meeting_id = item.get("id")
-                if not isinstance(meeting_id, str) or not meeting_id:
-                    raise UserError("Missing stable Wispr meeting ID")
-                if meeting_id not in seen:
-                    seen.add(meeting_id)
-                    yield await self.get(meeting_id)
-            if page.get("has_more") is False:
-                break
+            yield page
+            if page.get("has_more") is False or page.get("truncated"):
+                return
             cursor = page.get("next_cursor")
             if not isinstance(cursor, str) or not cursor or cursor in cursors:
                 raise UserError("Missing or repeated Wispr search cursor")

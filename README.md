@@ -29,7 +29,9 @@ uv run callimachus sync
 uv run callimachus watch
 ```
 
-`sync` runs once. `watch` polls every five minutes by default while the process is running. Stop with Ctrl+C. It does not install a background service or launch at login. The machine must remain awake and connected.
+`sync` runs once. `watch` polls every five minutes by default while the process is running; passes are serialized, a slow pass never overlaps the next one, and a second Callimachus process is rejected while a pass holds the lock. Stop with Ctrl+C. It does not install a background service or launch at login. The machine must remain awake and connected.
+
+Discovery starts from all available history, with no cutoff to choose. When Wispr caps a search, the start-time window is split and each part is paginated; stable meeting IDs prevent duplicates across parts. A window that cannot be split further is reported as incomplete discovery instead of being silently truncated. `--since` and `--until` remain available to narrow a pass manually. Every pass revisits every meeting: entries whose `modified_at` matches the archived snapshot are counted as `unchanged` and not fetched again, so edits to old meetings and meetings that became ready later are picked up on the next pass. A failed search or a failed pass never marks anything as deleted.
 
 Wispr login opens your browser, listens on `127.0.0.1:8765` for up to five minutes, and stores authorization locally. Your account needs Notetaker/MCP access. No Wispr API key is required. A pre-existing ChatGPT/Codex connection does not authorize this standalone client. See [Wispr’s remote MCP setup](https://docs.wisprflow.ai/articles/9551372685-connect-an-mcp-client-to-wispr-flow-remote-mcp-server).
 
@@ -120,7 +122,7 @@ uv run callimachus --env-file /absolute/path/callimachus.env sync
 uv run callimachus doctor
 ```
 
-`doctor` checks local credential-file presence; it does not verify remote authorization. `sync` exits 0 after successful delivery (including partial archives by default), 1 on configuration/access/integrity/transfer errors, and 2 for strict completeness failure. Ctrl+C exits 130. `watch` logs operational error categories and retries with increasing delay, up to one hour; credentials requiring fresh consent must be renewed with `login`. Locks are released between polling passes, allowing login and audio attachment while the watcher sleeps. If a pass is active, retry the command after that pass. Strict completeness mode stops the watcher with exit code 2 on incomplete archives.
+`doctor` checks local credential-file presence and prints the outcome of the last pass from `CALLIMACHUS_STATE_DIR/status.json` (time, ok or failed, counts or error category); it does not verify remote authorization. The status file never contains meeting text or tokens. `sync` exits 0 after successful delivery (including partial archives by default), 1 on configuration/access/integrity/transfer errors, and 2 for strict completeness failure. Ctrl+C exits 130. `watch` logs operational error categories and retries with increasing delay, up to one hour; credentials requiring fresh consent must be renewed with `login`. Locks are released between polling passes, allowing login and audio attachment while the watcher sleeps. If a pass is active, retry the command after that pass. Strict completeness mode stops the watcher with exit code 2 on incomplete archives.
 
 Run only one writer per archive and Drive destination. Local locks prevent concurrent use of the same state/archive directories; they do not coordinate separate machines. Do not delete the state directory during a sync, and keep it private. Custom archive or credential locations should be outside this Git repository.
 

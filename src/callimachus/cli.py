@@ -8,11 +8,12 @@ import shutil
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
+from .archive import atomic_write, canonical
 from .auth import connect_wispr, drive_service
 from .config import Config
 from .current import CurrentArchive, LocalStore
@@ -95,22 +96,27 @@ def attach_audio(config, meeting_id, source):
     print("Recording attached. Run sync to publish the next revision.")
 
 
-async def meetings(config, args):
+async def meetings(config, args, skip):
     if args.input:
-        data = json.loads(args.input.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(args.input.read_text(encoding="utf-8"))
+        except ValueError:
+            raise UserError("Input file is not valid JSON") from None
         if not isinstance(data, list):
             raise UserError("Input must be a JSON list of normalized meetings")
         for item in data:
             if not isinstance(item, dict):
                 raise UserError("Each input meeting must be an object")
-            yield Meeting(**item)
+            meeting = Meeting(**item)
+            if not skip(meeting.id, meeting.modified_at):
+                yield meeting
         return
     async with connect_wispr(config.state) as session:
 
         async def call(name, arguments):
             return decode_result(await session.call_tool(name, arguments))
 
-        async for meeting in WisprSource(call).meetings(args.since, args.until):
+        async for meeting in WisprSource(call).meetings(args.since, args.until, skip):
             yield meeting
 
 
@@ -122,39 +128,61 @@ async def sync(config, args):
         store, registry = LocalStore(config.archive), config.state / "registry.json"
     archive = CurrentArchive(store, registry, config.timezone, config.restore)
     archive.reconcile()
-    counts = {"imported": 0, "pending": 0, "suppressed": 0}
-    async for meeting in meetings(config, args):
+    counts = {"imported": 0, "unchanged": 0, "pending": 0, "suppressed": 0}
+
+    def skip(meeting_id, modified_at):
+        if archive.unchanged(meeting_id, modified_at):
+            counts["unchanged"] += 1
+            return True
+        return False
+
+    async for meeting in meetings(config, args, skip):
         counts[archive.publish(meeting)] += 1
     summary = " ".join(f"{k}={v}" for k, v in counts.items())
     print(f"{summary} destination={config.destination}", flush=True)
+    record_status(config, True, summary)
     return 2 if counts["pending"] and config.require_complete else 0
+
+
+def record_status(config, ok, detail):
+    """Local diagnostics for unattended operation; never contains meeting text or tokens."""
+    status = {"time": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ok": ok}
+    status["summary" if ok else "error"] = detail
+    atomic_write(config.state / "status.json", canonical(status))
 
 
 def run_sync(config, args):
     """One synchronization pass; the local archive directory is protected by its own lock."""
-    if config.destination == "drive":
-        return asyncio.run(sync(config, args))
-    config.archive.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with FileLock(str(config.archive / ".writer.lock"), timeout=0):
-        return asyncio.run(sync(config, args))
+    try:
+        if config.destination == "drive":
+            return asyncio.run(sync(config, args))
+        config.archive.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with FileLock(str(config.archive / ".writer.lock"), timeout=0):
+            return asyncio.run(sync(config, args))
+    except Exception as exc:
+        record_status(config, False, describe_error(exc))
+        raise
 
 
-def report_error(exc):
+def describe_error(exc) -> str:
     # SDK exception groups can contain URLs, credentials or meeting content.
     # Only expose our actionable ValueErrors; never dump remote response bodies.
     if isinstance(exc, BaseExceptionGroup):
         for child in exc.exceptions:
             if isinstance(child, (UserError, BaseExceptionGroup)):
-                report_error(child)
-                return
+                return describe_error(child)
+    if isinstance(exc, Timeout):
+        return "Another Callimachus process holds the lock; wait for its pass or stop it"
     if isinstance(exc, UserError):
-        print(f"Error: {exc}", file=sys.stderr)
-    else:
-        print(
-            f"Error: {type(exc).__name__}. Check connectivity, credentials and archive access; "
-            "retry sync after resolving the problem.",
-            file=sys.stderr,
-        )
+        return str(exc)
+    return (
+        f"{type(exc).__name__}. Check connectivity, credentials and archive access; "
+        "retry sync after resolving the problem."
+    )
+
+
+def report_error(exc):
+    print(f"Error: {describe_error(exc)}", file=sys.stderr)
 
 
 def watch(config, args):
@@ -189,7 +217,12 @@ def main():
                     print(
                         f"{service}_credentials={'present' if (config.state / (service + '-token.json')).exists() else 'missing'}"
                     )
-                print(f"destination={config.destination}; local staging is retained")
+                status_file = config.state / "status.json"
+                if status_file.exists():
+                    status = json.loads(status_file.read_text())
+                    print(f"last_pass={'ok' if status['ok'] else 'failed'} at {status['time']}")
+                    print(f"  {status.get('summary') or status.get('error')}")
+                print(f"destination={config.destination}")
                 return 0
             if args.command == "login":
                 if args.service == "wispr":

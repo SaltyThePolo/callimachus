@@ -113,10 +113,21 @@ class CurrentArchive:
                 self._place(meeting_id, record)
         self._save()
 
+    def unchanged(self, meeting_id: str, modified_at: str | None) -> bool:
+        """True when the published snapshot is this one, so the source need not be fetched again."""
+        record = self.meetings.get(meeting_id)
+        return bool(
+            record
+            and record["published"]
+            and modified_at is not None
+            and record.get("modified_at") == modified_at
+            and not (self.restore and record["deleted"])
+        )
+
     def publish(self, meeting: Meeting) -> str:
         """Return imported, pending (source text incomplete) or suppressed (user deleted folder)."""
         record = self.meetings.setdefault(meeting.id, {"published": False, "deleted": []})
-        record.update(start=meeting.start, title=meeting.title)
+        record.update(start=meeting.start, title=meeting.title, modified_at=meeting.modified_at)
         if not ready(meeting):
             if "folder" in record:  # keep an existing folder named correctly, reserve no new name
                 self._place(meeting.id, record)
