@@ -83,6 +83,8 @@ This distinction follows the per-file [Drive upload API](https://developers.goog
 
 ### Docker and OAuth
 
+Distribution is source-based: Compose builds the application image locally. The user withdrew Docker Hub/prebuilt-image distribution; do not add CI or release image builds/pushes. Container smoke checks remain part of implementation validation. No Docker Hub credentials are required by the application or CI.
+
 Provide a minimal Linux container image and Compose setup, with persistent private operational state and an optional host-mounted local archive. Exclude credentials, state, meeting content, and local environment files from build context as well as Git. Use restart-unless-stopped behavior and document enabling the host runtime at login/boot; do not combine competing host process supervisors with Docker's restart policy. See [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
 
 Interactive setup runs separately from the watcher and prints an authorization link for the host browser. Use fixed callback ports for the setup invocation, host-loopback publishing, and a container listener reachable through that mapping. Keep the OAuth redirect URI on loopback, validate state, retain PKCE, and close the listener after setup. Do not expose callback ports on the always-running watcher. For a headless server, document a loopback SSH tunnel to the setup callback rather than a public callback endpoint.

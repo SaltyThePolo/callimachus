@@ -1,0 +1,65 @@
+name: Commit messages
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-commits:
+    if: ${{ github.event_name == 'pull_request' || !github.event.deleted }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check new commit subjects
+        shell: python
+        run: |
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          pattern = re.compile(
+              r"(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"
+              r"(\([a-z0-9][a-z0-9._/-]*\))?!?: \S.*"
+          )
+          # Runnable regression check for the shared format rule.
+          for subject in ("feat: add import", "fix(drive): retry upload", "feat(api)!: change format"):
+              assert pattern.fullmatch(subject), subject
+          for subject in ("update files", "fix:", "fix: ", "fix(): retry", "feat:missing space"):
+              assert not pattern.fullmatch(subject), subject
+
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          if "pull_request" in event:
+              base = event["pull_request"]["base"]["sha"]
+              tip = event["pull_request"]["head"]["sha"]
+          else:
+              base, tip = event.get("before", ""), event["after"]
+          assert re.fullmatch(r"[0-9a-f]{40,64}", tip), "Invalid head SHA"
+          if base and set(base) != {"0"}:
+              assert re.fullmatch(r"[0-9a-f]{40,64}", base), "Invalid base SHA"
+              commits = git("rev-list", "--no-merges", f"{base}..{tip}").splitlines()
+          else:
+              # A newly created branch must not revalidate published history.
+              commits = [tip] if len(git("rev-list", "--parents", "-n", "1", tip).split()) < 3 else []
+          invalid = []
+          for commit in commits:
+              subject = git("show", "-s", "--format=%s", commit)
+              if not pattern.fullmatch(subject):
+                  invalid.append(f"{commit[:8]} {subject}")
+          if invalid:
+              print("Expected type(optional-scope): description. See AGENTS.md.")
+              print("\n".join(invalid))
+              raise SystemExit(1)
+          print(f"Validated {len(commits)} commit subject(s).")

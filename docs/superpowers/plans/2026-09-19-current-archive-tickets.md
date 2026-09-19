@@ -42,6 +42,8 @@ Blocked by: Automatically import full history and subsequent updates.
 
 Deliver one documented container/Compose workflow with persistent private state, automatic restart, desktop login startup, and a separate browser-based OAuth setup command using loopback callbacks. Document the headless-server tunnel workflow. Test expired credentials after cold start and fix only the integration gaps needed for unattended renewal. Keep credentials outside images/build contexts and callback ports off the watcher.
 
+Build the application image locally through Compose. The user explicitly withdrew prebuilt-image distribution: no Docker Hub publication and no CI/release image builds. See the current ticket for this superseding decision.
+
 Verify container recreation, callback binding/state validation, failed/revoked refresh behavior, and supported-host smoke tests. No claim of validated cross-platform behavior before those checks run.
 
 ## 5. Convert existing archives with verified cleanup

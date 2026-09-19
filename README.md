@@ -169,7 +169,7 @@ Run only one writer per archive and Drive destination. Local locks prevent concu
 
 ## History and large accounts
 
-Every pass scans the selected date window, including earlier meetings, to pick up edits. Unfinalized meetings are skipped. Text is read until the provider’s continuation markers are exhausted. If the meeting changes during pagination, the pass fails and can be retried; no mixed revision is published.
+Every pass scans the selected date window, including earlier meetings, to pick up edits. Unfinalized meetings are skipped. Text is read until the provider’s continuation markers are exhausted. If the meeting changes during pagination, the pass fails and can be retried; no mixed snapshot is published.
 
 Wispr caps a search at 1,000 results. Callimachus reports a cap instead of silently declaring a complete backup. Narrow the window when necessary:
 
