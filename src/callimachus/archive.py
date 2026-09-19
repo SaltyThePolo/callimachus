@@ -109,8 +109,9 @@ class Archive:
             staged = Path(temporary)
             missing = _stage(meeting, audio, staged)
             metadata = _metadata(meeting, staged, missing)
-            (staged / "metadata.json").write_bytes(canonical(metadata))
-            destination = revisions / hashlib.sha256(canonical(metadata)).hexdigest()
+            payload = canonical(metadata)
+            (staged / "metadata.json").write_bytes(payload)
+            destination = revisions / hashlib.sha256(payload).hexdigest()
             _commit(staged, destination)
         manifest = parent / "latest.json"
         _publish(

@@ -191,21 +191,17 @@ class WisprSource:
                 else:
                     offsets[field] = following
             if len(complete) == 2:
-                for key in ("title", "start", "summary"):
-                    if not isinstance(first.get(key), str):
-                        raise UserError(f"Wispr meeting omitted {key}")
-                return Meeting(
-                    id=meeting_id,
-                    title=first["title"],
-                    start=first["start"],
-                    notes="".join(chunks["content"]),
-                    summary=first["summary"],
-                    transcript="".join(chunks["transcript"])
-                    if first.get("has_transcript")
-                    else None,
-                    end=first.get("end"),
-                    modified_at=first.get("modified_at"),
-                    share_link=first.get("share_link"),
-                    attendees=first.get("attendees", []),
+                fields = {k: first.get(k) for k in ("title", "start", "summary", "end")}
+                fields |= {k: first.get(k) for k in ("modified_at", "share_link") if k in first}
+                return Meeting.parse(
+                    fields
+                    | {
+                        "id": meeting_id,
+                        "notes": "".join(chunks["content"]),
+                        "transcript": "".join(chunks["transcript"])
+                        if first.get("has_transcript")
+                        else None,
+                        "attendees": first.get("attendees", []),
+                    }
                 )
         raise UserError("Wispr text pagination exceeded safety limit")

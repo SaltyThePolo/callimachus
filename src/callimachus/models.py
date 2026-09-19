@@ -12,7 +12,9 @@
 
 from hashlib import sha256
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+
+from .errors import UserError
 
 
 def meeting_key(meeting_id: str) -> str:
@@ -32,6 +34,15 @@ class Meeting(BaseModel):
     modified_at: str | None = None  # opaque Wispr version token, compared for equality only
     share_link: str | None = None
     attendees: list[str] = []
+
+    @classmethod
+    def parse(cls, data: dict) -> "Meeting":
+        """Validate source data; the first problem becomes a UserError naming the field."""
+        try:
+            return cls.model_validate(data)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            raise UserError(f"{'.'.join(map(str, first['loc']))}: {first['msg']}") from None
 
     @property
     def key(self) -> str:

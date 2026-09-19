@@ -24,7 +24,6 @@ from importlib.metadata import version
 from pathlib import Path
 
 from filelock import FileLock, Timeout
-from pydantic import ValidationError
 
 from . import migrate
 from .auth import connect_wispr, drive_service
@@ -106,11 +105,7 @@ async def meetings(config, args, skip):
         for item in data:
             if not isinstance(item, dict):
                 raise UserError("Each input meeting must be an object")
-            try:
-                meeting = Meeting.model_validate(item)
-            except ValidationError as exc:
-                first = exc.errors()[0]
-                raise UserError(f"{'.'.join(map(str, first['loc']))}: {first['msg']}") from None
+            meeting = Meeting.parse(item)
             if not skip(meeting.id, meeting.modified_at):
                 yield meeting
         return
@@ -197,12 +192,10 @@ def user_errors(exc):
 def describe_error(exc) -> str:
     # SDK exception groups can contain URLs, credentials or meeting content.
     # Only expose our actionable UserErrors; never dump remote response bodies.
-    if isinstance(exc, BaseExceptionGroup) and (found := user_errors(exc)):
+    if found := user_errors(exc):
         return "; ".join(found)
     if isinstance(exc, Timeout):
         return "Another Callimachus process holds the lock; wait for its pass or stop it"
-    if isinstance(exc, UserError):
-        return str(exc)
     return (
         f"{type(exc).__name__}. Check connectivity, credentials and archive access; "
         "retry sync after resolving the problem."
